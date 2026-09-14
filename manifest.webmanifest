@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Prompt Studio 提示词工坊",
+  "short_name": "Prompt Studio",
+  "description": "离线可用的提示词创作、调试与游乐工具箱",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "https://pwa.jdhsf.top/",
+  "scope": "https://pwa.jdhsf.top/",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#0F1115",
+  "theme_color": "#0F1115",
+  "categories": ["productivity", "utilities", "developer"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "新建提示词", "short_name": "新建", "url": "https://pwa.jdhsf.top/#/editor", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "提示词扭蛋", "short_name": "扭蛋", "url": "https://pwa.jdhsf.top/#/gacha", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
