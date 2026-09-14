@@ -23,9 +23,36 @@ python3 -m http.server 8080
 # F12 → Application → Manifest / Service Workers 可验证
 ```
 
-## 三、部署到 pwa.jdhsf.top（Cloudflare Pages）
+## 三、部署状态
 
-你的 `jdhsf.top` 已经在跑「接单护身符」站点（Next.js + Cloudflare 代理），所以这次用 **子域名 `pwa.jdhsf.top`**，不影响主域。
+- **仓库**：https://github.com/wang52001/prompt-studio-pwa
+- **托管**：GitHub Pages（官方案例：分支 `main`，根目录 `/`，构建耗时约 44 秒）
+- **自定义域**：`pwa.jdhsf.top`（通过仓库根目录的 `CNAME` 文件配置）
+- **已验证**：托管端能正确返回 `index.html`、manifest、sw.js、og-image.png、css/js，全部 200
+
+> `jdhsf.top` 根域在跑「接单护身符」，所以本应用一律走**子域名** `pwa.jdhsf.top`，互不干扰。
+
+### ⚠️ 还差一步：加 DNS 记录
+
+在 Cloudflare DNS 里加一条记录：
+
+| 类型 | 名称 | 目标 | 代理状态 |
+| --- | --- | --- | --- |
+| CNAME | `pwa` | `wang52001.github.io` | **DNS only（灰色云）**，否则可能被重定向循环 |
+
+加完等 5～15 分钟，GitHub 会自动签发 Let's Encrypt 证书，届时 `https://pwa.jdhsf.top` 即可访问并安装到桌面。
+
+验证：`dig +short CNAME pwa.jdhsf.top` 返回 `wang52001.github.io` 即生效。
+
+---
+
+### 附：改用 Cloudflare Pages
+
+若要换成 Cloudflare Pages（国内访问更快），需要 Cloudflare API Token：
+
+1. 打开 https://dash.cloudflare.com/profile/api-tokens → Create Custom Token
+2. 权限给 `Account - Cloudflare Pages: Edit`、`Zone - DNS: Edit`、`Zone - Zone: Read`
+3. 把 token 给我，其余步骤可全自动完成（含建 Pages 项目、绑自定义域、自动写 DNS）
 
 ### 1. 推送代码到 GitHub
 
