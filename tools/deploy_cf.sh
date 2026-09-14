@@ -41,15 +41,19 @@ fi
 [[ -n "$CF_ACCOUNT_ID" ]] || { echo "✗ 取不到 Account ID"; exit 1; }
 echo "  Account: $CF_ACCOUNT_ID"
 
-echo "▶ 清理可能冲突的旧 DNS 记录 ($DOMAIN)"
+echo "▶ 确保 DNS 记录指向 Pages ($DOMAIN)"
 existing=$(jget "$API/zones/$ZONE_ID/dns_records?type=CNAME&name=$DOMAIN")
 ids=$(echo "$existing" | jq1 "
 import json
 print(' '.join(r['id'] for r in d['result']))")
-for id in $ids; do
-  echo "  删除 DNS 记录 $id"
-  curl -s -X DELETE "$API/zones/$ZONE_ID/dns_records/$id" -H "$AUTH" >/dev/null
-done
+if [[ -n "$ids" ]]; then
+  echo "  CNAME 已存在，跳过创建"
+else
+  curl -s -X POST "$API/zones/$ZONE_ID/dns_records" \
+    -H "$AUTH" -H "Content-Type: application/json" \
+    --data "{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$PROJECT.pages.dev\",\"proxied\":true,\"ttl\":1}" \
+    | jq1 "print('  创建 CNAME ->', d['success'])"
+fi
 
 echo "▶ 部署到 Cloudflare Pages (Direct Upload)"
 export CLOUDFLARE_API_TOKEN="$CF_API_TOKEN"
