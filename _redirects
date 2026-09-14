@@ -1,1 +1,2 @@
-/*    /index.html   200
+# 使用 hash 路由（/#/editor），服务端永远只服务根路径，无需 SPA 回退规则。
+# 注意：不要添加 /* -> /index.html，否则会遮蔽 /api/* 的 Pages Functions。

@@ -21,13 +21,13 @@ export const screens3 = {
     </div>
     ${scroll(`
       <div class="badge-row">
-        <div class="badge-tile" data-action="toast" data-msg="初出茅庐 · 解锁于 2026.08.02">
+        <div class="badge-tile" data-action="toast" data-msg="初出茅庐 · 完成注册即解锁">
           <span class="badge-icon" style="background:var(--primary)"></span>初出茅庐
         </div>
-        <div class="badge-tile" data-action="toast" data-msg="连续打卡 7 天 · 解锁于 2026.09.10">
+        <div class="badge-tile" data-action="toast" data-msg="连续打卡 7 天">
           <span class="badge-icon" style="background:var(--success)"></span>连续打卡 7 天
         </div>
-        <div class="badge-tile" data-action="toast" data-msg="扭蛋达人 · 解锁于 2026.09.12">
+        <div class="badge-tile" data-action="toast" data-msg="扭蛋达人 · 抽满 20 次">
           <span class="badge-icon" style="background:var(--secondary)"></span>扭蛋达人
         </div>
       </div>
@@ -38,7 +38,7 @@ export const screens3 = {
         <div class="badge-tile locked" data-action="toast" data-msg="未解锁：完成 1 次 Bingo 全图">
           <span class="badge-icon" style="background:var(--border)"></span>Bingo 大师
         </div>
-        <div class="badge-tile" data-action="toast" data-msg="竞技场十连胜 · 解锁于 2026.09.08">
+        <div class="badge-tile" data-action="toast" data-msg="竞技场十连胜">
           <span class="badge-icon" style="background:var(--danger)"></span>竞技场十连胜
         </div>
       </div>
@@ -46,7 +46,7 @@ export const screens3 = {
 
   // 12 每日锦鲤
   koi: () => shell('koi', '', `
-    ${toolbar({ title: '每日锦鲤', right: '<span class="text-xs text-warning">连续 12 天</span>' })}
+    ${toolbar({ title: '每日锦鲤', right: '<span class="text-xs text-warning">连续 <span data-stat="streak">0</span> 天</span>' })}
     ${scroll(`
       <div class="koi-card">
         <span class="label">今日锦鲤 · 已翻开</span>
@@ -55,12 +55,12 @@ export const screens3 = {
       </div>
 
       <div class="row gap-2 mt-3">
-        <button class="btn flex-1" data-action="toast" data-msg="已收藏到素材库">收藏到素材库</button>
+        <button class="btn flex-1" data-action="save-koi">收藏到素材库</button>
         <button class="btn ghost flex-1" data-action="toast" data-msg="生成分享卡片">分享锦鲤</button>
       </div>
 
       <div class="koi-calendar mt-4">
-        <div class="text-xs text-muted">本月打卡 · 漏签可花 20 积分补签</div>
+        <div class="text-xs text-muted">本月打卡 · 漏签可花 20 灵感值补签</div>
         <div class="calendar-row">
           <div class="calendar-day check">1</div>
           <div class="calendar-day check">2</div>
@@ -128,49 +128,45 @@ export const screens3 = {
     ${scroll(`
       <div class="card profile-card">
         <div class="profile-row">
-          <div class="profile-avatar">创</div>
+          <div class="profile-avatar" data-user="avatar">创</div>
           <div class="col">
-            <div style="font-size:16px;font-weight:600">创作者小明</div>
-            <div class="profile-meta">ID 8842130 · Lv.4 Prompt 大师</div>
+            <div style="font-size:16px;font-weight:600" data-user="nickname">创作者</div>
+            <div class="profile-meta" data-user="email">—</div>
           </div>
         </div>
-        <div class="profile-track"><div class="profile-track-fill"></div></div>
-        <div class="text-xs text-muted mt-2">再获 720 积分升至 Lv.5</div>
+        <div class="profile-track"><div class="profile-track-fill" data-stat="levelBar" style="width:0%"></div></div>
+        <div class="text-xs text-muted mt-2">当前 <span data-stat="credits">0</span> 灵感值 · 写提示词与打卡可持续获得</div>
       </div>
 
       <div class="data-row-4">
-        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)">1,284</span>AI调用总次数</div>
-        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)">128.4K</span>累计 Token</div>
-        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)">86</span>模板收藏</div>
-        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)">12</span>连续打卡</div>
+        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)" data-stat="calls">0</span>AI调用总次数</div>
+        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)" data-stat="tokens">0</span>累计 Token</div>
+        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)" data-stat="prompts">0</span>我的提示词</div>
+        <div class="data-cell"><span style="font-size:15px;font-weight:700;color:var(--text)" data-stat="streak">0</span>连续打卡</div>
       </div>
 
       <div class="group-title">我的内容</div>
-      ${listItem('我的模板&nbsp;&nbsp;32', 'toast')}
+      ${listItem('我的模板', 'go:library')}
       <div class="mt-2"></div>
-      ${listItem('我的对战&nbsp;&nbsp;48 场', 'toast')}
+      ${listItem('Bingo 打卡', 'go:bingo')}
       <div class="mt-2"></div>
-      ${listItem('我的沙雕&nbsp;&nbsp;15 条', 'toast')}
-      <div class="mt-2"></div>
-      ${listItem('投稿记录&nbsp;&nbsp;6 条', 'toast')}
+      ${listItem('统计分析', 'go:stats')}
 
       <div class="group-title">账户</div>
       ${listItem('API 密钥管理', 'go:apikeys')}
       <div class="mt-2"></div>
-      ${listItem('积分明细', 'toast')}
-      <div class="mt-2"></div>
       ${listItem('订阅状态&nbsp;&nbsp;免费版', 'toast')}
 
       <div class="group-title">偏好</div>
-      ${listItem('主题切换&nbsp;&nbsp;&nbsp;深色', 'toast')}
+      ${listItem('设置', 'go:settings')}
       <div class="mt-2"></div>
-      ${listItem('默认模型&nbsp;&nbsp;&nbsp;DeepSeek-V3', 'toast')}
+      ${listItem('主题切换&nbsp;&nbsp;&nbsp;深色', 'toast')}
 
       <div class="group-title">PWA</div>
       ${listItem('添加到桌面 / 离线缓存', 'install')}
       <div class="mt-2"></div>
-      ${listItem('关于 / 检查更新&nbsp;&nbsp;&nbsp;v1.0.0', 'toast')}
+      ${listItem('关于 / 检查更新&nbsp;&nbsp;&nbsp;v1.1.0', 'toast')}
 
-      <button class="logout-btn mt-4" data-action="toast" data-msg="已退出登录（演示）">退出登录</button>
+      <button class="logout-btn mt-4" data-action="logout">退出登录</button>
     `)}`)
 };

@@ -1,7 +1,7 @@
 /* Prompt Studio PWA — Service Worker
-   策略：预缓存 + 静态资源缓存优先，导航请求网络优先回退首页 */
+   策略：预缓存 + 静态资源缓存优先；/api 一律走网络 */
 
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = `prompt-studio-${VERSION}`;
 
 const PRECACHE = [
@@ -10,11 +10,14 @@ const PRECACHE = [
   './manifest.webmanifest',
   './css/app.css',
   './js/app.js',
+  './js/api.js',
+  './js/store.js',
   './js/screens.js',
   './js/screens-1.js',
   './js/screens-2.js',
   './js/screens-3.js',
   './js/screens-4.js',
+  './js/screens-5.js',
   './js/helpers.js',
   './js/icons.js',
   './icons/icon-192.png',
@@ -29,6 +32,7 @@ self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE)
       .then(c => c.addAll(PRECACHE))
+      .catch(() => null)
       .then(() => self.skipWaiting())
   );
 });
@@ -43,16 +47,16 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET') return;
-
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
+  // 后端接口：永不缓存
+  if (url.pathname.startsWith('/api/')) return;
+  if (req.method !== 'GET') return;
+
   // 导航请求：网络优先，失败回退缓存首页
   if (req.mode === 'navigate') {
-    e.respondWith(
-      fetch(req).catch(() => caches.match('./index.html'))
-    );
+    e.respondWith(fetch(req).catch(() => caches.match('./index.html')));
     return;
   }
 
