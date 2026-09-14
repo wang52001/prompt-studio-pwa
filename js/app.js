@@ -105,7 +105,13 @@ document.addEventListener('click', (e) => {
 
   const el = e.target.closest('[data-action]');
   if (!el) return;
-  const { action, msg, target, color } = el.dataset;
+  let { action, msg, target, color } = el.dataset;
+
+  // 兼容 listItem('xx', 'go:screen') 这类带冒号的写法
+  if (action.startsWith('go:')) {
+    target = action.slice(3);
+    action = 'go';
+  }
 
   switch (action) {
     case 'go':
@@ -136,6 +142,10 @@ document.addEventListener('click', (e) => {
 
     case 'draw':
       drawGacha();
+      break;
+
+    case 'install':
+      promptInstall();
       break;
 
     case 'retry-connect':
@@ -225,6 +235,62 @@ function drawGacha() {
       </div>`);
     drawing = false;
   }, 1500);
+}
+
+/* ---------------- 安装到桌面 ---------------- */
+let deferredInstall = null;
+const isStandalone = () =>
+  window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () =>
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstall = null;
+  toast('安装成功 🎉', 'success');
+});
+
+function installSheet(title, steps) {
+  overlay(`
+    <div class="text-center" style="margin-bottom:14px">
+      <div style="font-size:16px;font-weight:700">${title}</div>
+      <div class="text-sm text-muted" style="margin-top:4px">添加到主屏后，断网也能用</div>
+    </div>
+    <div class="card">
+      ${steps.map((s, i) => `
+        <div class="row gap-3" style="align-items:flex-start;${i ? 'margin-top:10px' : ''}">
+          <span class="badge" style="min-width:20px">${i + 1}</span>
+          <span class="text-sm flex-1" style="line-height:1.6">${s}</span>
+        </div>`).join('')}
+    </div>
+    <button class="btn block mt-3" data-close>知道啦</button>`);
+}
+
+function promptInstall() {
+  if (isStandalone()) { toast('已经是桌面应用啦 ✓', 'success'); return; }
+
+  // Android / 桌面：Chrome 给了 Hook，直接唤起系统安装弹窗
+  if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; return; }
+
+  if (isIOS()) {
+    installSheet('在 iPhone 上安装（Safari）', [
+      '用 <b>Safari</b> 打开 <b>https://pwa.jdhsf.top</b><br><span class="text-xs text-muted">微信里打开的不行，先点右上角「⋯ → 在 Safari 中打开」</span>',
+      '点底部中间的<b>分享按钮</b>（方框 + 向上箭头）',
+      '在列表里下滑，选<b>「添加到主屏幕」</b>',
+      '右上角「添加」，桌面出现图标即完成'
+    ]);
+  } else {
+    installSheet('在安卓上安装（Chrome）', [
+      '用 <b>Chrome</b> 打开 <b>https://pwa.jdhsf.top</b>',
+      '点右上角<b>「⋮」菜单</b>',
+      '选<b>「安装应用」</b>或<b>「添加到主屏幕」</b>',
+      '确认后桌面出现图标，自动开始离线缓存'
+    ]);
+  }
 }
 
 /* ---------------- 网络状态 ---------------- */
