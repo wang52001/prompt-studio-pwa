@@ -177,7 +177,7 @@ export const screens4 = {
 
   // 20 离线状态页
   offline: () => shell('offline', '', `
-    <div class="offline-banner" style="padding-top:calc(14px + var(--sat))">当前离线：AI 调试不可用，编辑与素材库可正常使用</div>
+    <div class="offline-banner">当前离线：AI 调试不可用，编辑与素材库可正常使用</div>
     ${scroll(`
       <div class="group-title" style="color:var(--success)">离线可用</div>
       <div class="list-item offline-available" data-action="go" data-target="editor"><span>提示词编辑器</span><span class="text-success">可用</span></div>
