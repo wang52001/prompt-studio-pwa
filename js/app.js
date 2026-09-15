@@ -1804,10 +1804,11 @@ async function boot() {
 
   syncNetwork();
 
+  // 注意：boot() 常在 load 之后才执行，若只挂 load 监听会导致 SW 永远不注册
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
+    const regSW = () => navigator.serviceWorker.register('sw.js').catch(() => {});
+    if (document.readyState === 'complete') regSW();
+    else window.addEventListener('load', regSW, { once: true });
   }
 }
 

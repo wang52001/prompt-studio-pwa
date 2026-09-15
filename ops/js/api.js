@@ -1,17 +1,47 @@
 /* PromptOps 前端 API 封装 */
 const API = '/opsapi';
 
+/* GET 结果落一份 localStorage：断网时降级展示上次数据，而不是直接报错 */
+const CACHE_PREFIX = 'ops:api:';
+function cacheRead(path) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + path);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function cacheWrite(path, data) {
+  try { localStorage.setItem(CACHE_PREFIX + path, JSON.stringify({ t: Date.now(), data })); } catch { /* 超配额忽略 */ }
+}
+
 async function api(path, options = {}) {
   const opt = { credentials: 'same-origin', ...options };
+  const isGet = !opt.method || opt.method === 'GET';
   if (opt.body && typeof opt.body !== 'string') {
     opt.headers = { 'Content-Type': 'application/json', ...(opt.headers || {}) };
     opt.body = JSON.stringify(opt.body);
   }
-  const res = await fetch(`${API}/${path}`, opt);
-  const text = await res.text();
+
+  let res, text;
+  try {
+    res = await fetch(`${API}/${path}`, opt);
+    text = await res.text();
+  } catch (e) {
+    const hit = isGet ? cacheRead(path) : null;
+    if (hit) {
+      window.__opsOffline = true;
+      window.__opsOfflineAt = hit.t;
+      return { ...hit.data, __offline: true, __cachedAt: hit.t };
+    }
+    const err = new Error('网络不可用');
+    err.offline = true;
+    throw err;
+  }
+
   let data;
   try { data = JSON.parse(text); } catch { throw new Error(`服务端返回异常 (${res.status})`); }
   if (!res.ok || data.error) throw new Error(data.error || `请求失败 (${res.status})`);
+  window.__opsOffline = false;
+  if (isGet) cacheWrite(path, data);
   return data;
 }
 

@@ -18,7 +18,16 @@ const ICONS = {
 function shell(inner, { nav = null, tab = '' } = {}) {
   const bar = nav ? `<div class="nav">${nav}</div>` : '';
   return `<div class="status"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
-          <div class="page">${bar}${inner}</div>`;
+          <div class="page">${bar}${offlineBanner()}${inner}</div>`;
+}
+
+/** 离线降级横幅：告诉用户看到的是缓存，不是"坏了" */
+function offlineBanner() {
+  if (!window.__opsOffline) return '';
+  const when = window.__opsOfflineAt
+    ? new Date(window.__opsOfflineAt).toTimeString().slice(0, 5) : '';
+  return `<div class="card" style="background:#2A2110;border-color:#5A4218;padding:10px 14px">
+    <div class="t12 warn">离线模式 · 显示 ${when} 的缓存数据</div></div>`;
 }
 const navBar = (title, right = '') =>
   `<div class="back" onclick="history.back()">${ICONS.back}</div><h2>${esc(title)}</h2>
@@ -62,7 +71,11 @@ async function route() {
       default:             setTab('home');    return render(app, await screenHome(), 'home');
     }
   } catch (e) {
-    render(app, `<div class="empty"><b>出错了</b>${esc(e.message)}</div>`, '');
+    render(app, e.offline
+      ? `<div class="empty"><b>当前处于离线状态</b>本机还没有这份数据的缓存，
+           连上网络后会自动恢复。<br><br>
+           <button class="btn primary" onclick="route()">重试</button></div>`
+      : `<div class="empty"><b>出错了</b>${esc(e.message)}</div>`, '');
   }
 }
 

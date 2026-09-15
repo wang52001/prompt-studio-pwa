@@ -37,10 +37,13 @@ self.addEventListener('install', (e) => {
   );
 });
 
+// 只清理 prompt-studio-* 自己的缓存：/ops/ 子应用有独立 SW（promptops-*），
+// 按"非本版本即删除"过滤会误删子应用的缓存。
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(
+        keys.filter(k => k.startsWith('prompt-studio-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -49,6 +52,10 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  // /ops/ 子应用有独立 SW 接管，这里一律放行，避免两套缓存策略打架
+  if (url.pathname.startsWith('/ops')) return;
+  if (url.pathname.startsWith('/opsapi/')) return;
 
   // 后端接口：永不缓存
   if (url.pathname.startsWith('/api/')) return;
