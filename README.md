@@ -65,6 +65,16 @@ python3 tools/ui_regress.py    # Playwright 浏览器回归（逐页验证真实
 python3 tools/seed_content.py --remote   # 灌词库 / 徽章 / 锦鲤卡池（幂等）
 ```
 
+### 运维小工具
+
+```bash
+export CLOUDFLARE_API_TOKEN=<Cloudflare API Token>
+python3 tools/d1.py "SELECT id, email, credits FROM users ORDER BY id DESC LIMIT 10"
+python3 tools/d1.py "DELETE FROM sessions WHERE expires_at < datetime('now')" --write
+```
+
+写操作必须显式加 `--write`，且只允许 `DELETE / UPDATE / INSERT`。
+
 ### 自带 AI 密钥（用户密钥管理）
 
 每个用户都能在 App 内添加自己的大模型 Key，后端用 **AES-GCM** 加密后存 D1。
