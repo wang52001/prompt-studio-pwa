@@ -47,18 +47,17 @@ export const screens4 = {
   apikeys: () => shell('apikeys', '', `
     ${toolbar({ title: 'API 密钥管理' })}
     ${scroll(`
-      <div class="security-banner">AI 密钥保存在服务端环境变量中，浏览器永远拿不到，也不会出现在任何响应里。</div>
+      <div class="security-banner">密钥经 AES-GCM 加密后存在服务端，浏览器拿不到明文，也不会出现在任何响应里。</div>
 
-      <div class="card key-card">
-        <div class="text-sm text-bold">阿里云百炼 DashScope&nbsp;&nbsp;·&nbsp;&nbsp;<span class="text-success">已连接</span>&nbsp;·&nbsp;默认</div>
-        <div class="text-sm text-muted mt-2">sk-**** **** **** (服务端)</div>
-        <div class="ops">可用模型&nbsp;&nbsp;&nbsp;&nbsp;qwen-turbo / plus / max</div>
-      </div>
+      <div id="keyList"><div class="text-xs text-muted">加载中…</div></div>
 
-      <div class="card">
+      <button class="btn block mt-3" data-action="key-add">+ 添加密钥</button>
+
+      <div class="card mt-3">
         <div class="text-xs text-muted" style="line-height:1.7">
-          想换模型服务商：在 Cloudflare Pages 项目里改环境变量
-          <b>DASHSCOPE_API_KEY</b>，重新部署即可，前端无需改动。
+          添加后调试台会<b>优先用你自己的密钥</b>，费用走你自己的账号；<br>
+          没添加也没关系，会回退到应用内置的服务端密钥。<br>
+          支持任何 OpenAI 兼容接口（百炼 / DeepSeek / GLM / OpenAI / Kimi / 自建）。
         </div>
       </div>
     `)}`),

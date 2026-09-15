@@ -2,9 +2,9 @@
 import { screens, showTabBar, TITLES } from './screens.js';
 import * as A from './api.js';
 import {
-  state, MODELS, nfmt, kfmt, loadUser, refreshPrompts, refreshStats,
-  loadBingo, refreshAll, todayCalls, totalTokens, bingoDone, bingoLines,
-  currentPrompt
+  state, MODELS, PROVIDERS, providerName, nfmt, kfmt, loadUser, refreshPrompts,
+  refreshStats, loadBingo, refreshKeys, refreshAll, todayCalls, totalTokens,
+  bingoDone, bingoLines, currentPrompt, availableModels, activeKey, usingOwnKey
 } from './store.js';
 
 const $  = (s, r = document) => r.querySelector(s);
@@ -64,6 +64,9 @@ function apply(id) {
 
   const sc = $(`.screen[data-screen="${id}"] .screen-scroll`);
   if (sc) sc.scrollTop = 0;
+
+  if (id === 'apikeys') renderKeys();
+  if (id === 'debug') updateModelPill();
 
   document.title = id === 'splash'
     ? 'Prompt Studio 提示词工坊'
@@ -334,6 +337,8 @@ function syncAll() {
   renderLibrary();
   paintBingo();
   renderStats();
+  renderKeys();
+  updateModelPill();
 }
 
 function relTime(t) {
@@ -487,6 +492,140 @@ async function copyText(t) {
   } catch { toast('复制失败，请手动选择', 'warning'); }
 }
 
+/* ================= API 密钥 ================= */
+function renderKeys() {
+  const box = $('#keyList');
+  if (!box) return;
+  const list = state.keys || [];
+
+  if (!list.length) {
+    box.innerHTML = `<div class="card">
+      <div class="text-sm text-muted" style="line-height:1.7">
+        还没有密钥。添加后调试台会优先用它调用模型，费用走你自己的账号。
+      </div></div>`;
+    return;
+  }
+
+  box.innerHTML = list.map(k => {
+    const st = k.status === 'ok' ? '<span class="text-success">可用</span>'
+      : k.status === 'error' ? '<span class="text-danger">异常</span>'
+      : '<span class="text-muted">未测试</span>';
+    return `
+      <div class="card key-card${k.is_default ? ' key-default' : ''}">
+        <div class="text-sm text-bold">${esc(providerName(k.provider))}&nbsp;&nbsp;·&nbsp;&nbsp;${st}${
+          k.is_default ? '&nbsp;·&nbsp;<span class="text-primary">默认</span>' : ''}</div>
+        <div class="text-sm text-muted mt-2">${esc(k.key_hint || '')}</div>
+        ${k.base_url ? `<div class="text-xs text-muted mt-1">${esc(k.base_url)}</div>` : ''}
+        <div class="text-xs text-muted mt-1">模型 ${esc(k.model || '—')}</div>
+        ${k.last_error ? `<div class="text-xs text-danger mt-1">${esc(k.last_error)}</div>` : ''}
+        <div class="ops">
+          <span data-action="key-test" data-id="${k.id}">测试连接</span>
+          ${k.is_default ? '' : `<span data-action="key-default" data-id="${k.id}">设为默认</span>`}
+          <span class="text-danger" data-action="key-del" data-id="${k.id}">删除</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function openKeySheet() {
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:10px">添加 AI 密钥</div>
+    <div class="card" style="text-align:left">
+      <select class="auth-input" id="keyProvider">
+        ${PROVIDERS.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+      </select>
+      <input class="auth-input mt-2" id="keySecret" type="password"
+             placeholder="API Key（sk-…）" autocomplete="off" />
+      <input class="auth-input mt-2" id="keyBaseUrl" type="url"
+             placeholder="Base URL，如 https://xxx/v1" hidden />
+      <div class="auth-msg" id="keyMsg"></div>
+    </div>
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-close>取消</button>
+      <button class="btn block" data-action="do-add-key">测试并保存</button>
+    </div>`);
+
+  const prov = $('#keyProvider');
+  prov?.addEventListener('change', () => {
+    const bu = $('#keyBaseUrl');
+    if (bu) bu.hidden = prov.value !== 'custom';
+  });
+}
+
+function keyMsg(text, bad = true) {
+  const el = $('#keyMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = `auth-msg${text ? (bad ? ' bad' : ' ok') : ''}`;
+}
+
+async function submitKey() {
+  const provider = $('#keyProvider')?.value;
+  const api_key = ($('#keySecret')?.value || '').trim();
+  const base_url = ($('#keyBaseUrl')?.value || '').trim();
+
+  if (!api_key) { keyMsg('请粘贴 API Key'); return; }
+  if (provider === 'custom' && !base_url) { keyMsg('自定义服务商需要填 Base URL'); return; }
+
+  const meta = PROVIDERS.find(p => p.id === provider);
+  keyMsg('正在测试连接…', false);
+
+  try {
+    await A.testKey({ provider, api_key, base_url, model: meta?.models?.[0] });
+  } catch (e) {
+    keyMsg(e.message || '连接失败');
+    return;
+  }
+
+  try {
+    const added = await A.addKey({ provider, api_key, base_url });
+    // 落库后再跑一次「按 id 测试」，把状态从「未测试」刷成「可用」
+    if (added?.id) await A.testKey({ id: added.id }).catch(() => {});
+    await refreshKeys();
+    renderKeys();
+    updateModelPill();
+    closeOverlay();
+    toast('密钥已保存 ✓', 'success');
+  } catch (e) {
+    keyMsg(e.message || '保存失败');
+  }
+}
+
+async function testKeyById(id) {
+  toast('测试中…');
+  try {
+    const r = await A.testKey({ id });
+    await refreshKeys();
+    renderKeys();
+    toast(`连接正常 ✓（${r.model}）`, 'success');
+  } catch (e) {
+    await refreshKeys();
+    renderKeys();
+    toast(e.message || '连接失败', 'danger');
+  }
+}
+
+async function makeDefault(id) {
+  try {
+    await A.setDefault(id);
+    await refreshKeys();
+    renderKeys();
+    updateModelPill();
+    toast('已设为默认 ✓', 'success');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function removeKey(id) {
+  if (!confirm('删除这个密钥？删除后如果没别的密钥，会回退到应用内置密钥。')) return;
+  try {
+    await A.deleteKey(id);
+    await refreshKeys();
+    renderKeys();
+    updateModelPill();
+    toast('已删除');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
 /* ================= AI 调试台 ================= */
 let chatHistory = [];
 let streaming = false;
@@ -570,11 +709,22 @@ function clearChat() {
   toast('已清空对话');
 }
 
-function cycleModel() {
-  const i = MODELS.findIndex(m => m.id === state.model);
-  state.model = MODELS[(i + 1) % MODELS.length].id;
+function updateModelPill() {
   const pill = $('#modelPill');
-  if (pill) pill.innerHTML = `${MODELS.find(m => m.id === state.model).name} <span class="text-muted">▾</span>`;
+  if (pill) pill.innerHTML = `${state.model} <span class="text-muted">▾</span>`;
+  const src = $('#keySource');
+  if (src) {
+    const k = activeKey();
+    src.textContent = k ? `用你的密钥 · ${providerName(k.provider)}` : '用应用内置密钥';
+    src.className = `text-xs ${k ? 'text-success' : 'text-muted'}`;
+  }
+}
+
+function cycleModel() {
+  const ms = availableModels();
+  const i = ms.findIndex(m => m.id === state.model);
+  state.model = ms[(i + 1) % ms.length].id;
+  updateModelPill();
   toast(`已切换到 ${state.model}`);
 }
 
@@ -897,6 +1047,12 @@ document.addEventListener('click', async (e) => {
     case 'theme':       setTheme(color); toast(`主题色已切换 ${color}`); break;
     case 'install':     promptInstall(); break;
     case 'logout':      doLogout(); break;
+
+    case 'key-add':     openKeySheet(); break;
+    case 'do-add-key':  submitKey(); break;
+    case 'key-test':    testKeyById(Number(id)); break;
+    case 'key-default': makeDefault(Number(id)); break;
+    case 'key-del':     removeKey(Number(id)); break;
 
     case 'auth-mode':   setAuthMode(el.dataset.mode); break;
     case 'password-sheet': openPasswordSheet(false); break;

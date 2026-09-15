@@ -6,15 +6,29 @@ export const state = {
   prompts: [],         // 云端提示词列表
   stats: null,         // { daily, models, totals, prompt_count, credits, recent }
   bingo: [],           // 25 格 0/1
+  keys: [],            // 用户自带 AI 密钥（脱敏）
   currentPromptId: null,
   model: 'qwen-plus'   // 调试台当前模型
 };
 
+/* 没有自带密钥时，用服务端内置的阿里云百炼 */
 export const MODELS = [
   { id: 'qwen-turbo', name: 'Qwen-Turbo' },
   { id: 'qwen-plus', name: 'Qwen-Plus' },
   { id: 'qwen-max', name: 'Qwen-Max' }
 ];
+
+/* 与 functions/_ai.js 保持一致，仅用于前端展示与下拉 */
+export const PROVIDERS = [
+  { id: 'dashscope', name: '阿里云百炼', models: ['qwen-turbo', 'qwen-plus', 'qwen-max'] },
+  { id: 'deepseek',  name: 'DeepSeek',   models: ['deepseek-chat', 'deepseek-reasoner'] },
+  { id: 'glm',       name: '智谱 GLM',   models: ['glm-4-flash', 'glm-4-plus'] },
+  { id: 'openai',    name: 'OpenAI',     models: ['gpt-4o-mini', 'gpt-4o'] },
+  { id: 'moonshot',  name: 'Moonshot Kimi', models: ['moonshot-v1-8k', 'moonshot-v1-32k'] },
+  { id: 'custom',    name: '自定义（OpenAI 兼容）', models: [] }
+];
+
+export const providerName = (id) => PROVIDERS.find(p => p.id === id)?.name || id;
 
 /* ---------------- 格式化 ---------------- */
 export const nfmt = (n) => Number(n || 0).toLocaleString('zh-CN');
@@ -73,8 +87,37 @@ export async function loadBingo() {
   return state.bingo;
 }
 
+export async function refreshKeys() {
+  try {
+    const r = await A.listKeys();
+    state.keys = r.keys || [];
+  } catch {
+    state.keys = [];
+  }
+  // 当前模型若不在可选列表里，自动切到第一个
+  const ms = availableModels();
+  if (!ms.some(m => m.id === state.model)) state.model = ms[0].id;
+  return state.keys;
+}
+
 export async function refreshAll() {
-  await Promise.all([refreshPrompts(), refreshStats(), loadBingo()]);
+  await Promise.all([refreshPrompts(), refreshStats(), loadBingo(), refreshKeys()]);
+}
+
+/* 当前可选模型：有默认密钥时用它所在服务商的模型，否则用内置 qwen */
+export function availableModels() {
+  const k = (state.keys || []).find(x => x.is_default);
+  const p = k && PROVIDERS.find(x => x.id === k.provider);
+  if (p && p.models.length) return p.models.map(id => ({ id, name: id }));
+  return MODELS;
+}
+
+export function activeKey() {
+  return (state.keys || []).find(x => x.is_default) || null;
+}
+
+export function usingOwnKey() {
+  return !!activeKey();
 }
 
 /* ---------------- 派生值 ---------------- */

@@ -47,6 +47,21 @@
 | Bingo 打卡 | 25 格状态按月存云端，刷新 / 换设备不丢 |
 | 竞技场 | 裁判模型对你的提示词与基线提示词分别打分，胜出 +20 灵感值 |
 | 灵感值体系 | 注册送 500，抽卡 -10，竞技场胜出 +20 |
+| **自带 AI 密钥** | 在「我的 → API 密钥管理」里填自己的 Key，调试台优先用它、费用走自己账号；删掉自动回退内置 Key |
+
+### 自带 AI 密钥（用户密钥管理）
+
+每个用户都能在 App 内添加自己的大模型 Key，后端用 **AES-GCM** 加密后存 D1。
+
+| 环节 | 策略 |
+| --- | --- |
+| 存储 | AES-256-GCM 加密，密钥来自 Pages Secret `KEYS_ENC_KEY`（32 字节 hex / 64 字符），每条记录独立 IV |
+| 传输 | 只在「添加」时提交一次明文，之后所有响应只返回脱敏的 `key_hint`（如 `sk-****4f2a`） |
+| 使用 | 调试台优先取 `is_default=1` 的用户密钥；没有才回退到服务端内置 `DASHSCOPE_API_KEY` |
+| 校验 | 保存前强制「测试连接」，连不通就拦下并给出上游原文原因 |
+| 支持的服务商 | 阿里云百炼 / DeepSeek / 智谱 GLM / OpenAI / Moonshot Kimi / 自定义（任意 OpenAI 兼容地址） |
+
+调试台顶部会实时显示当前用的是「自有密钥」还是「内置密钥」。
 
 手动测试账号可在 App 内直接注册，无需后台开通。
 
@@ -60,6 +75,7 @@ export CF_API_TOKEN=<Cloudflare API Token>
 npx wrangler pages secret put DASHSCOPE_API_KEY --project-name=prompt-studio-pwa   # AI
 npx wrangler pages secret put RESEND_API_KEY     --project-name=prompt-studio-pwa   # 发验证码邮件
 npx wrangler pages secret put MAIL_FROM          --project-name=prompt-studio-pwa   # 如 Prompt Studio <no-reply@jdhsf.top>
+npx wrangler pages secret put KEYS_ENC_KEY       --project-name=prompt-studio-pwa   # 用户密钥加密用，32字节hex
 
 # 2) 数据库（幂等）
 python3 tools/init_db.py
@@ -111,6 +127,11 @@ printf '<new-key>' | npx wrangler pages secret put RESEND_API_KEY --project-name
 | GET/PUT | `/api/playground/bingo` | 读 / 写本月打卡 |
 | POST | `/api/playground/arena` | 记录对局，胜出加灵感值 |
 | GET | `/api/stats` | 日趋势、模型占比、Token 汇总、最近调用 |
+| GET | `/api/keys` | 我的密钥列表（只返回 `key_hint`，不返回密文）+ 支持的服务商 |
+| POST | `/api/keys` | 新增密钥（服务端加密后落库） |
+| POST | `/api/keys/test` | 测试连接，可传 `id`（用已存的）或直接传明文（不落库） |
+| POST | `/api/keys/default` | 设为默认 |
+| PUT/DELETE | `/api/keys/:id` | 改模型 / 删除 |
 
 ## 五、本地全栈调试
 
@@ -172,8 +193,14 @@ prompt-studio-pwa/
 - 未验证邮箱无法注册：已移除旧的「邮箱+密码直接注册」入口。
 - 密码：PBKDF2-SHA256，10 万次迭代 + 每用户独立盐，只存哈希。
 - 会话：随机 32 字节 Token 存 D1，`HttpOnly + Secure + SameSite=Lax`，前端拿不到。
-- AI 密钥：只存在于 Pages 环境变量（Secret），后端注入请求头，任何响应都不会返回它。
-- 越权防护：所有提示词 / 数据查询都带 `user_id` 条件。
+- AI 密钥：
+  - 服务端内置 Key 只存在于 Pages Secret，后端注入请求头，任何响应都不会返回。
+  - 用户自带 Key 用 AES-256-GCM 加密后存 D1，加密主密钥在 Pages Secret `KEYS_ENC_KEY`；
+    接口只返回脱敏的 `key_hint`，明文永不出现在任何响应、日志或前端 DOM 里。
+- 越权防护：所有提示词 / 密钥 / 数据查询都带 `user_id` 条件，改不了别人的记录。
+- 错误状态码：业务错误统一返回 **4xx + JSON**。Cloudflare Pages 会吞掉 Functions 返回的 5xx
+  并替换成自带的 `error code: 502` 纯文本页，前端拿不到任何提示，所以凡是「需要把原因告诉
+  用户」的失败（密钥无效、上游报错、邮件发不出）都走 `fail()`（400）。
 
 ## 八、安装到手机
 

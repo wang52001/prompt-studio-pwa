@@ -1,0 +1,7 @@
+name = "prompt-studio-pwa"
+compatibility_date = "2024-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "prompt-studio-db"
+database_id = "04951dd3-385a-454e-9fce-58fb0af3e4c1"

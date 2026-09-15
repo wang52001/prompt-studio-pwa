@@ -118,8 +118,8 @@ export const screens1 = {
       right: `<button class="icon-btn small" data-action="clear-chat" aria-label="清空对话">${icons.more}</button>`
     })}
     <div class="config-row">
-      <div class="model-pill" data-action="model" id="modelPill">Qwen-Plus <span class="text-muted">${icons.chevron}</span></div>
-      <span class="text-xs text-muted">T 0.7 · 流式输出</span>
+      <div class="model-pill" data-action="model" id="modelPill">qwen-plus <span class="text-muted">${icons.chevron}</span></div>
+      <span class="text-xs text-muted" id="keySource">—</span>
     </div>
     <div class="chat-area" id="chatArea">
       <div class="bubble-ai">

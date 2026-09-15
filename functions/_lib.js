@@ -72,6 +72,37 @@ export async function createSession(env, userId) {
 /* ---------- 校验 ---------- */
 export const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || ''));
 
+/* ---------- 用户自带密钥：AES-GCM 加密存储 ---------- */
+const b64enc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const b64dec = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+async function aesKey(env) {
+  const hex = env.KEYS_ENC_KEY;
+  if (!hex || hex.length !== 64) throw new Error('服务端未配置 KEYS_ENC_KEY');
+  const raw = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) raw[i] = parseInt(hex.substr(i * 2, 2), 16) || 0;
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function encryptSecret(env, plain) {
+  const k = await aesKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, enc.encode(plain));
+  return { enc: b64enc(ct), iv: b64enc(iv) };
+}
+
+export async function decryptSecret(env, e, i) {
+  const k = await aesKey(env);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64dec(i) }, k, b64dec(e));
+  return new TextDecoder().decode(pt);
+}
+
+/** 列表里只展示脱敏片段，明文永不出服务端 */
+export const maskKey = (k) => {
+  const s = String(k || '');
+  return s.length <= 8 ? '****' : `${s.slice(0, 3)}****${s.slice(-4)}`;
+};
+
 /* ---------- 用量统计 ---------- */
 export async function logUsage(env, userId, model, usage, status = 'ok') {
   try {

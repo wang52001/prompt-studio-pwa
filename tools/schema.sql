@@ -67,6 +67,25 @@ CREATE TABLE IF NOT EXISTS arena_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- v3：用户自带 AI 密钥（AES-GCM 加密后存库，永不下发前端）
+CREATE TABLE IF NOT EXISTS user_keys (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL,
+  provider    TEXT    NOT NULL,
+  label       TEXT,
+  key_enc     TEXT    NOT NULL,
+  key_iv      TEXT    NOT NULL,
+  key_hint    TEXT,
+  base_url    TEXT,
+  model       TEXT,
+  is_default  INTEGER NOT NULL DEFAULT 0,
+  status      TEXT    NOT NULL DEFAULT 'unknown',
+  last_error  TEXT,
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_keys ON user_keys(user_id, is_default);
+
 -- v2：邮箱验证码登录
 CREATE TABLE IF NOT EXISTS email_codes (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

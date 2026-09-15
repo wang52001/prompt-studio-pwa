@@ -65,6 +65,14 @@ export const saveArena = (my, ai) => api('playground/arena', {
 /* ---------------- 统计 ---------------- */
 export const getStats = () => api('stats');
 
+/* ---------------- 用户自带 AI 密钥 ---------------- */
+export const listKeys   = () => api('keys');
+export const addKey     = (p) => api('keys', { method: 'POST', body: p });
+export const testKey    = (p) => api('keys/test', { method: 'POST', body: p });
+export const setDefault = (id) => api('keys/default', { method: 'POST', body: { id } });
+export const updateKey  = (id, p) => api(`keys/${id}`, { method: 'PUT', body: p });
+export const deleteKey  = (id) => api(`keys/${id}`, { method: 'DELETE' });
+
 /* ---------------- AI 一次性对话（非流式） ---------------- */
 export const chatOnce = (messages, model = 'qwen-plus', temperature = 0.2) =>
   api('chat', { method: 'POST', body: { messages, model, temperature, stream: false } });

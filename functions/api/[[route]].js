@@ -1,12 +1,22 @@
 // 后端统一入口：Cloudflare Pages Functions catch-all
 import {
   json, err, hashPassword, randomToken, currentUser, createSession,
-  isEmail, logUsage, readStreamUsage, sessionCookie, clearCookie
+  isEmail, logUsage, readStreamUsage, sessionCookie, clearCookie,
+  encryptSecret, decryptSecret, maskKey
 } from '../_lib.js';
 import { sendLoginCode, randomCode, sha256 } from '../_mail.js';
+import { PROVIDERS, resolveEndpoint, defaultModel, providerOptions } from '../_ai.js';
 
 const AI_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
+
+/**
+ * 业务错误统一用 4xx 返回。
+ * 注意：Cloudflare Pages 会吞掉 Functions 返回的 5xx，替换成自带的
+ * "error code: 502" 纯文本页，前端拿不到任何 JSON。所以凡是「需要把
+ * 原因告诉用户」的失败（密钥无效、上游报错、邮件发不出），一律走这里。
+ */
+const fail = (msg) => err(msg, 400);
 
 /* 验证码策略 */
 const CODE_TTL_MIN      = 10;   // 有效期（分钟）
@@ -104,9 +114,9 @@ export async function onRequest(ctx) {
       try {
         sent = await sendLoginCode(env, mail, code);
       } catch (e) {
-        return err('验证码发送失败：' + (e?.message || '邮件服务异常'), 502);
+        return fail('验证码发送失败：' + (e?.message || '邮件服务异常'));
       }
-      if (!sent.ok) return err(sent.error || '验证码发送失败', 500);
+      if (!sent.ok) return fail(sent.error || '验证码发送失败');
 
       return json({
         ok: true,
@@ -232,30 +242,151 @@ export async function onRequest(ctx) {
       return json({ ok: true });
     }
 
+    /* ---------- 用户自带 AI 密钥 ---------- */
+    if (path === 'keys' && method === 'GET') {
+      const { results } = await env.DB.prepare(
+        `SELECT id, provider, label, key_hint, base_url, model, is_default, status, last_error, updated_at
+         FROM user_keys WHERE user_id = ? ORDER BY is_default DESC, id DESC`
+      ).bind(user.id).all();
+      return json({ keys: results, providers: providerOptions() });
+    }
+
+    if (path === 'keys' && method === 'POST') {
+      const { provider, api_key, label, base_url, model } = await body(request);
+      if (!PROVIDERS[provider]) return err('未知的服务商');
+      if (!api_key || String(api_key).length < 8) return err('请填写有效的 API Key');
+
+      const { enc, iv } = await encryptSecret(env, String(api_key));
+      const cnt = await env.DB.prepare('SELECT COUNT(*) n FROM user_keys WHERE user_id = ?')
+        .bind(user.id).first();
+      const m = model || defaultModel(provider) || 'gpt-4o-mini';
+
+      const r = await env.DB.prepare(
+        `INSERT INTO user_keys (user_id, provider, label, key_enc, key_iv, key_hint, base_url, model, is_default)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(user.id, provider, label || PROVIDERS[provider].name, enc, iv,
+             maskKey(api_key), String(base_url || '').trim(), m, (cnt?.n || 0) === 0 ? 1 : 0).run();
+
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    if (path === 'keys/test' && method === 'POST') {
+      const { id, provider, api_key, base_url, model } = await body(request);
+      let p = provider, key = api_key, url = String(base_url || '').trim(), m = model;
+
+      if (id) {
+        const row = await env.DB.prepare('SELECT * FROM user_keys WHERE id = ? AND user_id = ?')
+          .bind(id, user.id).first();
+        if (!row) return err('密钥不存在', 404);
+        p = row.provider;
+        key = await decryptSecret(env, row.key_enc, row.key_iv);
+        url = row.base_url || '';
+        m = row.model;
+      }
+      if (!key) return err('缺少密钥');
+
+      const endpoint = resolveEndpoint(p, url);
+      if (!endpoint) return err(p === 'custom' ? '请先填写 Base URL' : '服务商地址未配置');
+
+      const testModel = m || defaultModel(p) || 'qwen-turbo';
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: testModel, messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 5, stream: false
+          })
+        });
+        if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
+        if (id) {
+          await env.DB.prepare("UPDATE user_keys SET status='ok', last_error=NULL, updated_at=datetime('now') WHERE id=?")
+            .bind(id).run();
+        }
+        return json({ ok: true, model: testModel });
+      } catch (e) {
+        const m2 = String(e?.message || e).slice(0, 200);
+        if (id) {
+          await env.DB.prepare("UPDATE user_keys SET status='error', last_error=?, updated_at=datetime('now') WHERE id=?")
+            .bind(m2, id).run();
+        }
+        return fail('连接失败：' + m2);
+      }
+    }
+
+    if (path === 'keys/default' && method === 'POST') {
+      const { id } = await body(request);
+      await env.DB.prepare('UPDATE user_keys SET is_default = 0 WHERE user_id = ?').bind(user.id).run();
+      await env.DB.prepare('UPDATE user_keys SET is_default = 1 WHERE id = ? AND user_id = ?')
+        .bind(id, user.id).run();
+      return json({ ok: true });
+    }
+
+    if (path.startsWith('keys/') && method === 'PUT') {
+      const id = path.split('/')[1];
+      const { model, label } = await body(request);
+      await env.DB.prepare(
+        `UPDATE user_keys SET model = COALESCE(?, model), label = COALESCE(?, label),
+         updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+      ).bind(model || null, label || null, id, user.id).run();
+      return json({ ok: true });
+    }
+
+    if (path.startsWith('keys/') && method === 'DELETE') {
+      const id = path.split('/')[1];
+      await env.DB.prepare('DELETE FROM user_keys WHERE id = ? AND user_id = ?')
+        .bind(id, user.id).run();
+      // 保证始终有一个默认密钥（如果还有的话）
+      const left = await env.DB.prepare(
+        'SELECT id FROM user_keys WHERE user_id = ? ORDER BY id LIMIT 1'
+      ).bind(user.id).first();
+      if (left) {
+        await env.DB.prepare('UPDATE user_keys SET is_default = 1 WHERE id = ?').bind(left.id).run();
+      }
+      return json({ ok: true });
+    }
+
     /* ---------- AI 对话 / 调试 ---------- */
     if (path === 'chat' && method === 'POST') {
-      const apiKey = env[AI_KEY_VAR];
-      if (!apiKey) return err('服务端未配置 DASHSCOPE_API_KEY', 500);
-
-      const { messages, model = 'qwen-turbo', temperature = 0.7, stream = true } = await body(request);
+      const { messages, model, temperature = 0.7, stream = true } = await body(request);
       if (!Array.isArray(messages) || !messages.length) return err('messages 不能为空');
 
-      const upstream = await fetch(AI_ENDPOINT, {
+      // 优先用用户自己的密钥，没有才回退到服务端内置密钥
+      let apiKey = env[AI_KEY_VAR];
+      let endpoint = AI_ENDPOINT;
+      let useModel = model || 'qwen-turbo';
+
+      const krow = await env.DB.prepare(
+        'SELECT * FROM user_keys WHERE user_id = ? AND is_default = 1 ORDER BY id DESC LIMIT 1'
+      ).bind(user.id).first();
+
+      if (krow) {
+        apiKey = await decryptSecret(env, krow.key_enc, krow.key_iv);
+        endpoint = resolveEndpoint(krow.provider, krow.base_url);
+        if (!model) useModel = krow.model || defaultModel(krow.provider) || 'qwen-turbo';
+        if (!endpoint) return err('默认密钥缺少 Base URL，请到 API 密钥管理里补全', 400);
+      }
+
+      if (!apiKey) {
+        return err('还没有可用的 AI 密钥：去「我的 → API 密钥管理」添加你自己的，或让管理员配置服务端密钥', 400);
+      }
+
+      const upstream = await fetch(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, temperature, stream })
+        body: JSON.stringify({ model: useModel, messages, temperature, stream })
       });
 
       if (!upstream.ok) {
         const text = await upstream.text();
-        await logUsage(env, user.id, model, null, 'error');
-        return err(`模型调用失败：${text.slice(0, 200)}`, 502);
+        await logUsage(env, user.id, useModel, null, 'error');
+        return fail(`模型调用失败：${text.slice(0, 200)}`);
       }
 
       if (stream) {
         // 分流：一路直接返回前端，一路后台统计 token
         const [toClient, toMeter] = upstream.body.tee();
-        ctx.waitUntil(readStreamUsage(toMeter).then(u => logUsage(env, user.id, model, u)));
+        ctx.waitUntil(readStreamUsage(toMeter).then(u => logUsage(env, user.id, useModel, u)));
         return new Response(toClient, {
           headers: {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -267,7 +398,7 @@ export async function onRequest(ctx) {
       }
 
       const data = await upstream.json();
-      await logUsage(env, user.id, model, data.usage);
+      await logUsage(env, user.id, useModel, data.usage);
       return json(data);
     }
 
@@ -364,7 +495,7 @@ export async function onRequest(ctx) {
 
     return err('接口不存在：/api/' + path, 404);
   } catch (e) {
-    return err('服务端异常：' + (e?.message || String(e)), 500);
+    return fail('服务端异常：' + (e?.message || String(e)));
   }
 }
 
