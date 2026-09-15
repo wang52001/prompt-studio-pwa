@@ -113,48 +113,172 @@ function authMsg(text, bad = false) {
   el.className = `auth-msg${text ? (bad ? ' bad' : ' ok') : ''}`;
 }
 
-let authMode = 'login';
+let authMode = 'code';        // 'code' | 'password'
+let cooldownTimer = null;
 
-function toggleAuthMode() {
-  authMode = authMode === 'login' ? 'register' : 'login';
-  const btn = $('#authSubmit');
-  const nick = $('#authNickname');
-  const toggle = $('#authToggle');
-  btn.dataset.mode = authMode;
-  btn.textContent = authMode === 'login' ? '登录' : '注册并进入';
-  nick.hidden = authMode !== 'register';
-  toggle.textContent = authMode === 'login' ? '还没有账号？注册一个' : '已有账号？直接登录';
-  $('#authPassword').setAttribute('autocomplete',
-    authMode === 'login' ? 'current-password' : 'new-password');
+/** 切换验证码 / 密码两种登录方式 */
+function setAuthMode(mode) {
+  authMode = mode === 'password' ? 'password' : 'code';
+  const isCode = authMode === 'code';
+
+  $('#tabCode')?.classList.toggle('active', isCode);
+  $('#tabPwd')?.classList.toggle('active', !isCode);
+
+  const code = $('#authCode'), pwd = $('#authPassword'),
+        nick = $('#authNickname'), send = $('#authSendCode'),
+        btn = $('#authSubmit'), toggle = $('#authToggle');
+
+  if (code)  { code.hidden  = !isCode; code.value = ''; }
+  if (pwd)   { pwd.hidden   = isCode;  pwd.value = ''; }
+  if (nick)  nick.hidden    = !isCode;
+  if (send)  send.hidden    = !isCode;
+  if (btn)   { btn.dataset.mode = authMode; btn.textContent = isCode ? '登录 / 注册' : '登录'; }
+  if (toggle) toggle.textContent = isCode ? '还没账号？填邮箱就能自动创建' : '用验证码登录 / 注册';
+
   authMsg('');
+}
+
+function startCooldown(sec) {
+  const btn = $('#authSendCode');
+  if (!btn) return;
+  clearInterval(cooldownTimer);
+  let left = sec;
+  btn.disabled = true;
+  btn.textContent = `${left}s`;
+  cooldownTimer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) {
+      clearInterval(cooldownTimer);
+      btn.disabled = false;
+      btn.textContent = '获取验证码';
+    } else {
+      btn.textContent = `${left}s`;
+    }
+  }, 1000);
+}
+
+const readEmail = () => ($('#authEmail')?.value || '').trim().toLowerCase();
+
+async function sendCodeFlow() {
+  const email = readEmail();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { authMsg('请先填写正确的邮箱', true); return; }
+
+  const btn = $('#authSendCode');
+  btn.disabled = true;
+  btn.textContent = '发送中…';
+  authMsg('');
+
+  try {
+    const r = await A.sendCode(email);
+    startCooldown(r.resend_after || 60);
+    if (r.dev_code) {
+      authMsg(`验证码已生成（邮件服务未配置，当前为调试模式）：${r.dev_code}`);
+    } else {
+      authMsg('验证码已发送，请查收邮件（留意垃圾邮件）');
+    }
+    setTimeout(() => $('#authCode')?.focus(), 80);
+  } catch (e) {
+    authMsg(e.message || '验证码发送失败', true);
+    btn.disabled = false;
+    btn.textContent = '获取验证码';
+  }
 }
 
 async function submitAuth() {
   const btn = $('#authSubmit');
-  const email = $('#authEmail').value.trim();
-  const password = $('#authPassword').value;
-  const nickname = $('#authNickname').value.trim();
+  const email = readEmail();
+  const code = ($('#authCode')?.value || '').trim();
+  const nickname = ($('#authNickname')?.value || '').trim();
+  const password = $('#authPassword')?.value || '';
 
-  if (!email || !password) { authMsg('请填写邮箱和密码', true); return; }
-  if (password.length < 6) { authMsg('密码至少 6 位', true); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { authMsg('请先填写正确的邮箱', true); return; }
 
   btn.disabled = true;
-  btn.textContent = authMode === 'login' ? '登录中…' : '注册中…';
+  btn.textContent = authMode === 'code' ? '验证中…' : '登录中…';
   authMsg('');
 
   try {
-    await (authMode === 'login' ? A.login(email, password) : A.register(email, password, nickname));
+    let hasPassword = true;
+    if (authMode === 'code') {
+      if (!/^\d{6}$/.test(code)) { throw new Error('请输入 6 位数字验证码'); }
+      const r = await A.verifyCode(email, code, nickname);
+      hasPassword = !!(r.user && r.user.has_password);
+    } else {
+      if (password.length < 6) throw new Error('密码至少 6 位');
+      await A.login(email, password);
+      hasPassword = true;
+    }
+
     state.user = await loadUser();
     if (!state.user) throw new Error('登录态写入失败，请重试');
+
+    clearAuthForm();
     toast(`欢迎，${state.user.nickname} 👋`, 'success');
     await refreshAll();
     syncAll();
     go('workbench');
+
+    if (!hasPassword) setTimeout(() => openPasswordSheet(true), 400);
   } catch (e) {
     authMsg(e.message || '操作失败', true);
   } finally {
     btn.disabled = false;
-    btn.textContent = authMode === 'login' ? '登录' : '注册并进入';
+    btn.textContent = authMode === 'code' ? '登录 / 注册' : '登录';
+  }
+}
+
+function clearAuthForm() {
+  ['#authEmail', '#authCode', '#authPassword', '#authNickname'].forEach(s => {
+    const el = $(s); if (el) el.value = '';
+  });
+  authMsg('');
+}
+
+/* ---------- 设置 / 修改密码 ---------- */
+function openPasswordSheet(canSkip = true) {
+  const has = !!state.user?.has_password;
+  overlay(`
+    <div class="text-center" style="margin-bottom:12px">
+      <div style="font-size:16px;font-weight:700">${has ? '修改登录密码' : '设置登录密码'}</div>
+      <div class="text-sm text-muted" style="margin-top:4px">
+        ${has ? '修改后原密码立即失效' : '设置后可直接用 邮箱 + 密码 登录'}
+      </div>
+    </div>
+    <div class="card" style="text-align:left">
+      ${has ? '<input class="auth-input" id="pwOld" type="password" placeholder="原密码" />' : ''}
+      <input class="auth-input${has ? ' mt-2' : ''}" id="pwNew" type="password" placeholder="新密码，至少 6 位" />
+      <input class="auth-input mt-2" id="pwConfirm" type="password" placeholder="再输入一次" />
+      <div class="auth-msg" id="pwMsg"></div>
+    </div>
+    <div class="action-bar mt-2">
+      ${canSkip ? '<button class="btn ghost block" data-close>以后再说</button>' : ''}
+      <button class="btn block" data-action="do-set-password">保存</button>
+    </div>`);
+}
+
+function pwMsg(text, bad = true) {
+  const el = $('#pwMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = `auth-msg${text ? (bad ? ' bad' : '') : ''}`;
+}
+
+async function submitSetPassword() {
+  const p = $('#pwNew')?.value || '';
+  const c = $('#pwConfirm')?.value || '';
+  const old = $('#pwOld')?.value || '';
+
+  if (p.length < 6) { pwMsg('密码至少 6 位'); return; }
+  if (p !== c) { pwMsg('两次输入的密码不一致'); return; }
+
+  try {
+    await A.setPassword(p, old);
+    if (state.user) state.user.has_password = true;
+    setText('[data-user="pwState"]', '已设置');
+    closeOverlay();
+    toast('密码已保存 ✓', 'success');
+  } catch (e) {
+    pwMsg(e.message || '保存失败');
   }
 }
 
@@ -166,7 +290,11 @@ async function doLogout() {
   state.bingo = Array(25).fill(0);
   state.currentPromptId = null;
   chatHistory = [];
-  authMode = 'login';
+  clearInterval(cooldownTimer);
+  const sendBtn = $('#authSendCode');
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
+  clearAuthForm();
+  setAuthMode('code');
   toast('已退出登录');
   go('login');
 }
@@ -181,6 +309,7 @@ function syncAll() {
   setText('[data-user="avatar"]', String(u.nickname || u.email || '创').trim().charAt(0).toUpperCase());
   setText('[data-user="nickname"]', u.nickname || '创作者');
   setText('[data-user="email"]', u.email || '');
+  setText('[data-user="pwState"]', u.has_password ? '已设置' : '未设置');
 
   setText('[data-stat="credits"]', nfmt(u.credits));
   setText('[data-stat="calls"]', nfmt(s?.totals?.calls || 0));
@@ -742,7 +871,11 @@ document.addEventListener('click', async (e) => {
 
   // 登录页按钮
   if (e.target.closest('#authSubmit')) { submitAuth(); return; }
-  if (e.target.closest('#authToggle')) { toggleAuthMode(); return; }
+  if (e.target.closest('#authSendCode')) { sendCodeFlow(); return; }
+  if (e.target.closest('#authToggle')) {
+    setAuthMode(authMode === 'code' ? 'password' : 'code');
+    return;
+  }
 
   // 分段控件（纯视觉）
   const seg = e.target.closest('.editor-tab, .chip, .pool-tab');
@@ -764,6 +897,10 @@ document.addEventListener('click', async (e) => {
     case 'theme':       setTheme(color); toast(`主题色已切换 ${color}`); break;
     case 'install':     promptInstall(); break;
     case 'logout':      doLogout(); break;
+
+    case 'auth-mode':   setAuthMode(el.dataset.mode); break;
+    case 'password-sheet': openPasswordSheet(false); break;
+    case 'do-set-password': submitSetPassword(); break;
 
     case 'new-prompt':  newPrompt(); break;
     case 'save-prompt': savePrompt(); break;
@@ -836,6 +973,7 @@ function bindInputs() {
 async function boot() {
   renderAll();
   bindInputs();
+  setAuthMode('code');
 
   await loadUser();
   if (state.user) {
@@ -858,7 +996,14 @@ async function boot() {
       if (btn) btn.click();
       return;
     }
-    if (e.target.classList.contains('auth-input')) { submitAuth(); }
+    if (e.target.classList.contains('auth-input')) {
+      // 验证码模式 + 还没填码 → 回车先发验证码，符合大多数人的习惯
+      if (e.target.id === 'authEmail' && authMode === 'code' && !($('#authCode')?.value || '').trim()) {
+        sendCodeFlow();
+      } else {
+        submitAuth();
+      }
+    }
   });
 
   syncNetwork();

@@ -66,3 +66,16 @@ CREATE TABLE IF NOT EXISTS arena_log (
   ai_score   REAL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- v2：邮箱验证码登录
+CREATE TABLE IF NOT EXISTS email_codes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  email      TEXT    NOT NULL,
+  salt       TEXT    NOT NULL,
+  code_hash  TEXT    NOT NULL,
+  expires_at TEXT    NOT NULL,
+  consumed   INTEGER NOT NULL DEFAULT 0,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email, consumed, expires_at DESC);

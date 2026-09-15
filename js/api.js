@@ -28,11 +28,20 @@ export async function api(path, { method = 'GET', body } = {}) {
 }
 
 /* ---------------- 认证 ---------------- */
-export const register = (email, password, nickname) =>
-  api('auth/register', { method: 'POST', body: { email, password, nickname } });
+// 邮箱验证码登录（主流程）
+export const sendCode    = (email, nickname) =>
+  api('auth/send-code', { method: 'POST', body: { email, nickname } });
 
-export const login = (email, password) =>
+export const verifyCode  = (email, code, nickname) =>
+  api('auth/verify-code', { method: 'POST', body: { email, code, nickname } });
+
+// 密码登录（需该账号已设置密码）
+export const login       = (email, password) =>
   api('auth/login', { method: 'POST', body: { email, password } });
+
+// 设置 / 修改密码（需已登录）
+export const setPassword = (password, oldPassword) =>
+  api('auth/set-password', { method: 'POST', body: { password, old_password: oldPassword } });
 
 export const logout = () => api('auth/logout', { method: 'POST' });
 

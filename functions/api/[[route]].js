@@ -3,9 +3,16 @@ import {
   json, err, hashPassword, randomToken, currentUser, createSession,
   isEmail, logUsage, readStreamUsage, sessionCookie, clearCookie
 } from '../_lib.js';
+import { sendLoginCode, randomCode, sha256 } from '../_mail.js';
 
 const AI_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
+
+/* 验证码策略 */
+const CODE_TTL_MIN      = 10;   // 有效期（分钟）
+const CODE_RESEND_SEC   = 60;   // 重发冷却（秒）
+const CODE_MAX_TRY      = 5;    // 单个码最多尝试次数
+const CODE_HOURLY_LIMIT = 10;   // 每邮箱每小时最多发几封
 
 /* 扭蛋奖池（服务端权威，防止前端伪造） */
 const GACHA_POOL = [
@@ -30,33 +37,15 @@ export async function onRequest(ctx) {
   }
 
   try {
-    /* ---------- 认证 ---------- */
-    if (path === 'auth/register' && method === 'POST') {
-      const { email, password, nickname } = await body(request);
-      if (!isEmail(email)) return err('邮箱格式不正确');
-      if (!password || password.length < 6) return err('密码至少 6 位');
-
-      const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
-      if (exists) return err('该邮箱已注册，请直接登录');
-
-      const salt = randomToken(16);
-      const hash = await hashPassword(password, salt);
-      const nick = nickname || String(email).split('@')[0] || '创作者';
-
-      const ins = await env.DB.prepare(
-        `INSERT INTO users (email, password_hash, salt, nickname, credits)
-         VALUES (?, ?, ?, ?, 500)`
-      ).bind(email, hash, salt, nick).run();
-
-      const token = await createSession(env, ins.meta.last_row_id);
-      return json({ ok: true, token }, 200, { 'Set-Cookie': sessionCookie(token) });
-    }
-
+    /* ---------- 密码登录（仅对已设置密码的账号开放） ---------- */
     if (path === 'auth/login' && method === 'POST') {
       const { email, password } = await body(request);
-      const row = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
-      if (!row) return err('邮箱不存在，请先注册', 404);
-      const hash = await hashPassword(password, row.salt);
+      const mail = String(email || '').trim().toLowerCase();
+      const row = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(mail).first();
+      if (!row) return err('该邮箱未注册，请先用验证码登录', 404);
+      if (!row.password_hash) return err('该账号尚未设置密码，请改用验证码登录');
+
+      const hash = await hashPassword(password || '', row.salt);
       if (hash !== row.password_hash) return err('密码错误');
 
       const token = await createSession(env, row.id);
@@ -74,9 +63,137 @@ export async function onRequest(ctx) {
       return json({ user });
     }
 
+    /* ---------- 邮箱验证码：发送 ---------- */
+    if (path === 'auth/send-code' && method === 'POST') {
+      const raw = await body(request);
+      const mail = String(raw.email || '').trim().toLowerCase();
+      if (!isEmail(mail)) return err('邮箱格式不正确');
+
+      // 重发冷却
+      const last = await env.DB.prepare(
+        'SELECT created_at FROM email_codes WHERE email = ? ORDER BY id DESC LIMIT 1'
+      ).bind(mail).first();
+      if (last) {
+        const d = await env.DB.prepare(
+          "SELECT CAST(strftime('%s','now') - strftime('%s', ?) AS INTEGER) d"
+        ).bind(last.created_at).first();
+        if ((d?.d ?? 999) < CODE_RESEND_SEC) {
+          return err(`请 ${CODE_RESEND_SEC - d.d} 秒后再获取`);
+        }
+      }
+
+      // 每小时上限
+      const hr = await env.DB.prepare(
+        "SELECT COUNT(*) n FROM email_codes WHERE email = ? AND created_at > datetime('now','-1 hours')"
+      ).bind(mail).first();
+      if ((hr?.n || 0) >= CODE_HOURLY_LIMIT) return err('获取过于频繁，请 1 小时后再试');
+
+      const code = randomCode();
+      const salt = randomToken(12);
+      const hash = await sha256(salt + code);
+
+      // 同一邮箱只保留最新一个可用码
+      await env.DB.prepare('UPDATE email_codes SET consumed = 1 WHERE email = ? AND consumed = 0')
+        .bind(mail).run();
+      await env.DB.prepare(
+        `INSERT INTO email_codes (email, salt, code_hash, expires_at)
+         VALUES (?, ?, ?, datetime('now', ?))`
+      ).bind(mail, salt, hash, `+${CODE_TTL_MIN} minutes`).run();
+
+      let sent;
+      try {
+        sent = await sendLoginCode(env, mail, code);
+      } catch (e) {
+        return err('验证码发送失败：' + (e?.message || '邮件服务异常'), 502);
+      }
+      if (!sent.ok) return err(sent.error || '验证码发送失败', 500);
+
+      return json({
+        ok: true,
+        provider: sent.provider,
+        ttl: CODE_TTL_MIN * 60,
+        resend_after: CODE_RESEND_SEC,
+        // 仅本地调试模式存在
+        ...(sent.devCode ? { dev_code: sent.devCode } : {})
+      });
+    }
+
+    /* ---------- 邮箱验证码：校验并登录 ---------- */
+    if (path === 'auth/verify-code' && method === 'POST') {
+      const { email, code, nickname } = await body(request);
+      const mail = String(email || '').trim().toLowerCase();
+      if (!isEmail(mail)) return err('邮箱格式不正确');
+      if (!/^\d{6}$/.test(String(code || ''))) return err('请输入 6 位数字验证码');
+
+      const row = await env.DB.prepare(
+        `SELECT * FROM email_codes
+         WHERE email = ? AND consumed = 0 AND expires_at > datetime('now')
+         ORDER BY id DESC LIMIT 1`
+      ).bind(mail).first();
+      if (!row) return err('验证码已失效，请重新获取', 404);
+      if (row.attempts >= CODE_MAX_TRY) return err('尝试次数过多，请重新获取验证码');
+
+      const hash = await sha256(row.salt + String(code));
+      if (hash !== row.code_hash) {
+        await env.DB.prepare('UPDATE email_codes SET attempts = attempts + 1 WHERE id = ?')
+          .bind(row.id).run();
+        const left = CODE_MAX_TRY - row.attempts - 1;
+        return err(left > 0 ? `验证码不正确，还可尝试 ${left} 次` : '验证码不正确，请重新获取');
+      }
+      await env.DB.prepare('UPDATE email_codes SET consumed = 1 WHERE id = ?').bind(row.id).run();
+
+      let uid = null;
+      const exist = await env.DB.prepare('SELECT id, nickname, credits, streak, created_at FROM users WHERE email = ?')
+        .bind(mail).first();
+      if (exist) {
+        uid = exist.id;
+      } else {
+        const nick = String(nickname || '').trim() || mail.split('@')[0] || '创作者';
+        const ins = await env.DB.prepare(
+          "INSERT INTO users (email, password_hash, salt, nickname, credits) VALUES (?, '', '', ?, 500)"
+        ).bind(mail, nick).run();
+        uid = ins.meta.last_row_id;
+      }
+
+      const token = await createSession(env, uid);
+      const me = await env.DB.prepare(
+        'SELECT id, email, nickname, credits, streak, created_at, password_hash FROM users WHERE id = ?'
+      ).bind(uid).first();
+
+      return json({
+        ok: true, token,
+        is_new: !exist,
+        user: {
+          id: me.id, email: me.email, nickname: me.nickname,
+          credits: me.credits, streak: me.streak, created_at: me.created_at,
+          has_password: !!me.password_hash
+        }
+      }, 200, { 'Set-Cookie': sessionCookie(token) });
+    }
+
     /* ---------- 以下需要登录 ---------- */
     const user = await currentUser(request, env);
     if (!user) return err('请先登录', 401);
+
+    /* ---------- 设置 / 修改密码（需登录） ---------- */
+    if (path === 'auth/set-password' && method === 'POST') {
+      const { password, old_password } = await body(request);
+      if (!password || String(password).length < 6) return err('密码至少 6 位');
+
+      const me = await env.DB.prepare('SELECT password_hash, salt FROM users WHERE id = ?')
+        .bind(user.id).first();
+
+      if (me?.password_hash) {
+        const okOld = await hashPassword(String(old_password || ''), me.salt);
+        if (okOld !== me.password_hash) return err('原密码不正确');
+      }
+
+      const salt = randomToken(16);
+      const hash = await hashPassword(String(password), salt);
+      await env.DB.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?')
+        .bind(hash, salt, user.id).run();
+      return json({ ok: true, has_password: true });
+    }
 
     /* ---------- 提示词 ---------- */
     if (path === 'prompts' && method === 'GET') {

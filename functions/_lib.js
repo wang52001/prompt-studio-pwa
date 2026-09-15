@@ -54,7 +54,8 @@ export async function currentUser(request, env) {
   if (!row) return null;
   return {
     id: row.id, email: row.email, nickname: row.nickname,
-    credits: row.credits, streak: row.streak, created_at: row.created_at
+    credits: row.credits, streak: row.streak, created_at: row.created_at,
+    has_password: !!row.password_hash
   };
 }
 

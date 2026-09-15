@@ -153,6 +153,8 @@ export const screens3 = {
       ${listItem('统计分析', 'go:stats')}
 
       <div class="group-title">账户</div>
+      ${listItem('登录密码&nbsp;&nbsp;<span data-user="pwState">未设置</span>', 'password-sheet')}
+      <div class="mt-2"></div>
       ${listItem('API 密钥管理', 'go:apikeys')}
       <div class="mt-2"></div>
       ${listItem('订阅状态&nbsp;&nbsp;免费版', 'toast')}

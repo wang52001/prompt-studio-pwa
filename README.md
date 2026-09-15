@@ -18,11 +18,27 @@
 | Cloudflare Account | `0bd1c630df5e907adf68b09c0ca6b2f0` |
 | Cloudflare Zone | `e17f0499e2f59c7850704eb95e4e2bfc`（`jdhsf.top`） |
 
-## 二、已实现的真实能力
+## 二、登录方式
+
+**主流程：邮箱验证码登录。** 输入邮箱 → 收 6 位验证码 → 登录，首次登录自动建号。
+登录成功后可以到「我的 → 登录密码」设置密码，之后也能用 邮箱 + 密码 登录。
+
+| 环节 | 策略 |
+| --- | --- |
+| 验证码 | 6 位随机数字，服务端只存 `SHA256(salt + code)` |
+| 有效期 | 10 分钟，单个码最多尝试 5 次 |
+| 频率限制 | 同一邮箱 60 秒重发冷却、每小时最多 10 封 |
+| 会话 | 随机 32 字节 Token 存 D1，Cookie 有效期 30 天 |
+| 密码 | PBKDF2-SHA256，10 万次迭代 + 每用户独立盐，只存哈希 |
+| 未验证邮箱不能注册 | 已移除旧的「邮箱+密码直接注册」接口，账号只能由验证码创建 |
+
+> 没有配邮件服务时（`RESEND_API_KEY` 缺失且 `MAIL_MODE≠dev`），发送接口会明确报错，不会假装成功。
+
+## 三、已实现的真实能力
 
 | 功能 | 说明 |
 | --- | --- |
-| 邮箱注册 / 登录 | PBKDF2-SHA256 加盐哈希；httpOnly + Secure + SameSite=Lax 会话 Cookie，30 天有效 |
+| 邮箱验证码登录 | 6 位验证码，10 分钟有效；首次登录自动建号；成功后可自行设置密码 |
 | 提示词云端 CRUD | 新建 / 保存 / 删除 / 搜索，按账号隔离，换设备登录即可继续 |
 | 变量替换预览 | `${变量名}` 自动填充，实时生成最终 Prompt 与 Token 估算 |
 | AI 真实调用 | 调试台 SSE 流式输出；编辑器 System 指令自动注入；可切 qwen-turbo / plus / max |
@@ -34,21 +50,37 @@
 
 手动测试账号可在 App 内直接注册，无需后台开通。
 
-## 三、部署 / 更新
+## 四、部署 / 更新
 
 ```bash
 cd prompt-studio-pwa
 export CF_API_TOKEN=<Cloudflare API Token>
-export DASHSCOPE_API_KEY=<百炼 API Key>
 
+# 1) 环境变量（Secret），换值时重跑即可，无需重新部署代码
+npx wrangler pages secret put DASHSCOPE_API_KEY --project-name=prompt-studio-pwa   # AI
+npx wrangler pages secret put RESEND_API_KEY     --project-name=prompt-studio-pwa   # 发验证码邮件
+npx wrangler pages secret put MAIL_FROM          --project-name=prompt-studio-pwa   # 如 Prompt Studio <no-reply@jdhsf.top>
+
+# 2) 数据库（幂等）
+python3 tools/init_db.py
+
+# 3) 部署
 ./tools/deploy_cf.sh      # 上传静态资源 + Functions，绑域名，等证书
-python3 tools/init_db.py  # 首次执行：建表（已建过则幂等）
-python3 tools/set_env.py  # 首次执行：把 AI 密钥写进 Pages 环境变量（Secret）
 ```
 
-脚本会自动完成：校验 Token → 取 Zone/Account → 清理冲突 DNS → 部署 → 绑自定义域 → 等证书 → 验证。
+deploy 脚本会自动完成：校验 Token → 取 Zone/Account → 确保 DNS 存在 → 部署 → 绑自定义域 → 等证书 → 验证。
 
 Token 需要的权限：`Cloudflare Pages:Edit`、`D1:Edit`、`DNS:Edit`、`Zone:Read`。
+
+### 邮件服务（Resend）
+
+`functions/_mail.js` 目前走 Resend REST API。上线前需要：
+
+1. 在 [resend.com](https://resend.com) 建账号，创建 API Key
+2. 添加发信域名并按提示加 DNS 记录（DKIM 的 `resend._domainkey` TXT + `return-path` 的 `_dmarc` TXT），验证通过后才能发给任意收件人
+3. 把 Key 配到 `RESEND_API_KEY`，发信人配到 `MAIL_FROM`
+
+未验证域名时，Resend 只能发到你注册 Resend 时用的那个邮箱，可以用来先自测。
 
 ## 四、后端接口
 
@@ -56,8 +88,10 @@ Token 需要的权限：`Cloudflare Pages:Edit`、`D1:Edit`、`DNS:Edit`、`Zone
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/auth/register` | 注册（邮箱 + 密码 + 昵称） |
-| POST | `/api/auth/login` | 登录，下发 Cookie |
+| POST | `/api/auth/send-code` | 发送登录验证码（带冷却与频率限制） |
+| POST | `/api/auth/verify-code` | 校验验证码并登录，首次自动建号 |
+| POST | `/api/auth/login` | 密码登录（仅已设置密码的账号） |
+| POST | `/api/auth/set-password` | 设置 / 修改密码（需登录） |
 | POST | `/api/auth/logout` | 退出，清会话 |
 | GET | `/api/auth/me` | 当前用户，未登录返回 `{user:null}` |
 | GET/POST | `/api/prompts` | 列表 / 新建 |
@@ -72,15 +106,27 @@ Token 需要的权限：`Cloudflare Pages:Edit`、`D1:Edit`、`DNS:Edit`、`Zone
 
 ```bash
 cd prompt-studio-pwa
+cp /dev/null wrangler.toml 2>/dev/null   # 本仓库不含 wrangler.toml，按需自建
 
-# 1) 建本地 D1 表
-npx wrangler d1 execute prompt-studio-db --local --file=tools/schema.sql
+# 1) 起本地服务（自动加载 functions/ 与 D1）
+npx wrangler pages dev . --d1=DB \
+  -b DASHSCOPE_API_KEY=<你的Key> \
+  -b MAIL_MODE=dev \            # 不真发邮件，验证码直接回给前端，便于本地自测
+  --port 8788
 
-# 2) 起本地服务（自动加载 functions/ 与 D1）
-npx wrangler pages dev . --d1=DB -b DASHSCOPE_API_KEY=<你的Key> --port 8788
+# 2) 首次需要给本地 D1 建表（wrangler 的本地库在 .wrangler/state 下）
+python3 - <<'PY'
+import glob, sqlite3
+s = open('tools/schema.sql').read()
+for f in glob.glob('.wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite'):
+    if 'metadata' in f: continue
+    sqlite3.connect(f).executescript(s)
+PY
 ```
 
-打开 http://localhost:8788 即可完整体验（注册 → 写提示词 → 调试 → 抽卡）。
+打开 http://localhost:8788 即可完整体验（验证码登录 → 写提示词 → 调试 → 抽卡）。
+
+> 生产环境务必不要设置 `MAIL_MODE=dev`，否则验证码会被下发给浏览器。
 
 ## 六、目录结构
 
@@ -100,17 +146,20 @@ prompt-studio-pwa/
 │  ├─ helpers.js / icons.js
 ├─ functions/
 │  ├─ _lib.js              密码哈希、会话、用量统计
+│  ├─ _mail.js             验证码邮件模板与 Resend 发送
 │  └─ api/[[route]].js     全部后端接口
 ├─ tools/
-│  ├─ schema.sql           D1 表结构
-│  ├─ init_db.py           远程建表
-│  ├─ set_env.py           写入 Pages 环境变量
+│  ├─ schema.sql           D1 表结构（含 email_codes）
+│  ├─ init_db.py           远程建表（幂等）
 │  └─ deploy_cf.sh         一键部署
 └─ icons/ og-image.png …
 ```
 
 ## 七、安全说明
 
+- 验证码：服务端只存 `SHA256(salt + code)`，10 分钟过期、最多错 5 次、用后即焚（置为已消费）。
+- 频率限制：同一邮箱 60 秒重发冷却 + 每小时上限 10 封，防止被当成垃圾邮件发射器。
+- 未验证邮箱无法注册：已移除旧的「邮箱+密码直接注册」入口。
 - 密码：PBKDF2-SHA256，10 万次迭代 + 每用户独立盐，只存哈希。
 - 会话：随机 32 字节 Token 存 D1，`HttpOnly + Secure + SameSite=Lax`，前端拿不到。
 - AI 密钥：只存在于 Pages 环境变量（Secret），后端注入请求头，任何响应都不会返回它。
