@@ -222,6 +222,7 @@ export async function onRequest(ctx) {
          VALUES (?, ?, ?, ?, ?, ?)`
       ).bind(user.id, p.title, p.system_prompt || '', p.user_prompt || '',
              JSON.stringify(p.variables || {}), p.model || 'qwen-turbo').run();
+      await checkBadges(env, user.id);
       return json({ ok: true, id: r.meta.last_row_id });
     }
 
@@ -414,12 +415,12 @@ export async function onRequest(ctx) {
         : GACHA_POOL.filter(x => x.rarity === '传说');
       const prize = pool[Math.floor(Math.random() * pool.length)];
 
-      await env.DB.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').bind(COST, user.id).run();
+      const credits = await addCredits(env, user.id, -COST, '扭蛋抽奖');
       await env.DB.prepare('INSERT INTO gacha_log (user_id, rarity, prize) VALUES (?, ?, ?)')
         .bind(user.id, prize.rarity, prize.text).run();
+      await checkBadges(env, user.id);
 
-      const row = await env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first();
-      return json({ ok: true, rarity: prize.rarity, prize: prize.text, credits: row.credits });
+      return json({ ok: true, rarity: prize.rarity, prize: prize.text, credits });
     }
 
     if (path === 'playground/gacha' && method === 'GET') {
@@ -445,6 +446,7 @@ export async function onRequest(ctx) {
         `INSERT INTO bingo_state (user_id, month, cells, updated_at) VALUES (?, ?, ?, datetime('now'))
          ON CONFLICT(user_id, month) DO UPDATE SET cells = excluded.cells, updated_at = datetime('now')`
       ).bind(user.id, month, JSON.stringify(cells || [])).run();
+      await checkBadges(env, user.id);
       return json({ ok: true });
     }
 
@@ -453,10 +455,411 @@ export async function onRequest(ctx) {
       await env.DB.prepare('INSERT INTO arena_log (user_id, my_score, ai_score) VALUES (?, ?, ?)')
         .bind(user.id, my_score ?? 0, ai_score ?? 0).run();
       if ((my_score ?? 0) > (ai_score ?? 0)) {
-        await env.DB.prepare('UPDATE users SET credits = credits + 20 WHERE id = ?').bind(user.id).run();
+        await addCredits(env, user.id, 20, '竞技场获胜');
       }
+      await checkBadges(env, user.id);
       const row = await env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first();
       return json({ ok: true, credits: row.credits });
+    }
+
+    /* ---------- 竞技场：排行榜 / 历史 ---------- */
+    if (path === 'playground/arena/board' && method === 'GET') {
+      const { results } = await env.DB.prepare(
+        `SELECT u.nickname,
+                COUNT(a.id) matches,
+                SUM(CASE WHEN a.my_score > a.ai_score THEN 1 ELSE 0 END) wins,
+                COALESCE(SUM(CASE WHEN a.my_score > a.ai_score THEN 30
+                                  WHEN a.my_score = a.ai_score THEN 10 ELSE 5 END), 0) points
+         FROM arena_log a JOIN users u ON u.id = a.user_id
+         WHERE a.created_at >= datetime('now', '-7 days')
+         GROUP BY u.id ORDER BY points DESC LIMIT 10`
+      ).all();
+      const mine = await env.DB.prepare(
+        `SELECT COUNT(*) matches,
+                SUM(CASE WHEN my_score > ai_score THEN 1 ELSE 0 END) wins,
+                COALESCE(SUM(CASE WHEN my_score > ai_score THEN 30
+                                  WHEN my_score = ai_score THEN 10 ELSE 5 END), 0) points
+         FROM arena_log WHERE user_id = ? AND created_at >= datetime('now', '-7 days')`
+      ).bind(user.id).first();
+      return json({ board: results, mine });
+    }
+
+    if (path === 'playground/arena/history' && method === 'GET') {
+      const { results } = await env.DB.prepare(
+        `SELECT my_score, ai_score, created_at FROM arena_log
+         WHERE user_id = ? ORDER BY id DESC LIMIT 20`
+      ).bind(user.id).all();
+      return json({ logs: results });
+    }
+
+    /* ---------- 沙雕生成器 ---------- */
+    if (path === 'silly' && method === 'GET') {
+      const pick = async (slot) => {
+        const { results } = await env.DB.prepare(
+          'SELECT text FROM silly_words WHERE slot = ? ORDER BY RANDOM() LIMIT 1'
+        ).bind(slot).all();
+        return results[0]?.text || '';
+      };
+      const slots = [await pick(0), await pick(1), await pick(2)];
+      const { results: hot } = await env.DB.prepare(
+        `SELECT p.id, p.body, p.likes, u.nickname
+         FROM silly_posts p JOIN users u ON u.id = p.user_id
+         ORDER BY p.likes DESC, p.id DESC LIMIT 10`
+      ).all();
+      const { results: mine } = await env.DB.prepare(
+        'SELECT id, body, likes, created_at FROM silly_posts WHERE user_id = ? ORDER BY id DESC LIMIT 20'
+      ).bind(user.id).all();
+      return json({ slots, hot, mine });
+    }
+
+    if (path === 'silly' && method === 'POST') {
+      const { body: text } = await body(request);
+      if (!text || String(text).length < 4) return err('内容太短了');
+      const r = await env.DB.prepare('INSERT INTO silly_posts (user_id, body) VALUES (?, ?)')
+        .bind(user.id, String(text).slice(0, 300)).run();
+      await checkBadges(env, user.id);
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    if (path === 'silly/like' && method === 'POST') {
+      const { id } = await body(request);
+      const dup = await env.DB.prepare('SELECT 1 FROM silly_likes WHERE user_id = ? AND post_id = ?')
+        .bind(user.id, id).first();
+      if (dup) return err('已经点过赞了');
+      await env.DB.prepare('INSERT INTO silly_likes (user_id, post_id) VALUES (?, ?)').bind(user.id, id).run();
+      await env.DB.prepare('UPDATE silly_posts SET likes = likes + 1 WHERE id = ?').bind(id).run();
+      const row = await env.DB.prepare('SELECT likes FROM silly_posts WHERE id = ?').bind(id).first();
+      return json({ ok: true, likes: row?.likes ?? 0 });
+    }
+
+    /* ---------- 成就徽章 ---------- */
+    if (path === 'badges' && method === 'GET') {
+      const [{ results: defs }, { results: owned }] = await Promise.all([
+        env.DB.prepare('SELECT * FROM badge_defs ORDER BY legendary, id').all(),
+        env.DB.prepare('SELECT badge_id, created_at FROM user_badges WHERE user_id = ?').bind(user.id).all()
+      ]);
+      const newOnes = await checkBadges(env, user.id);
+      const ownedMap = Object.fromEntries(owned.map(o => [o.badge_id, o.created_at]));
+      const list = defs.map(d => ({ ...d, unlocked: !!ownedMap[d.id], at: ownedMap[d.id] || null }));
+      return json({
+        badges: list,
+        total: defs.length,
+        unlocked: list.filter(b => b.unlocked).length,
+        new_unlocked: newOnes
+      });
+    }
+
+    /* ---------- 每日锦鲤 / 打卡 ---------- */
+    if (path === 'koi' && method === 'GET') {
+      const day = (await env.DB.prepare("SELECT date('now') d").first()).d;
+      let draw = await env.DB.prepare('SELECT card_id FROM koi_draws WHERE user_id = ? AND day = ?')
+        .bind(user.id, day).first();
+      let isNew = false;
+      if (!draw) {
+        const card = await env.DB.prepare('SELECT * FROM koi_cards ORDER BY RANDOM() LIMIT 1').first();
+        if (!card) return fail('锦鲤卡池还没准备好');
+        await env.DB.prepare('INSERT INTO koi_draws (user_id, day, card_id) VALUES (?, ?, ?)')
+          .bind(user.id, day, card.id).run();
+        draw = { card_id: card.id };
+        isNew = true;
+        await addCredits(env, user.id, 5, '翻开今日锦鲤');
+      }
+      const card = await env.DB.prepare('SELECT * FROM koi_cards WHERE id = ?').bind(draw.card_id).first();
+      const { results: calendar } = await env.DB.prepare(
+        `SELECT day, makeup FROM checkins WHERE user_id = ?
+         AND day >= date('now', '-29 days') ORDER BY day`
+      ).bind(user.id).all();
+      const me = await env.DB.prepare('SELECT credits, streak FROM users WHERE id = ?').bind(user.id).first();
+      return json({ card, isNew, day, calendar, credits: me.credits, streak: me.streak });
+    }
+
+    if (path === 'checkin' && method === 'POST') {
+      const day = (await env.DB.prepare("SELECT date('now') d").first()).d;
+      const ex = await env.DB.prepare('SELECT id FROM checkins WHERE user_id = ? AND day = ?')
+        .bind(user.id, day).first();
+      if (ex) return fail('今天已经打过卡了，明天再来');
+      await env.DB.prepare('INSERT INTO checkins (user_id, day) VALUES (?, ?)').bind(user.id, day).run();
+      await addCredits(env, user.id, 10, '每日打卡');
+      const streak = await recalcStreak(env, user.id);
+      await checkBadges(env, user.id);
+      return json({ ok: true, streak });
+    }
+
+    if (path === 'koi/makeup' && method === 'POST') {
+      const { day } = await body(request);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) return err('日期格式不对');
+      const ex = await env.DB.prepare('SELECT id FROM checkins WHERE user_id = ? AND day = ?')
+        .bind(user.id, day).first();
+      if (ex) return fail('这天已经签过了');
+      const me = await env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first();
+      if ((me.credits || 0) < 20) return fail('灵感值不足 20，补签需要 20');
+      await env.DB.prepare('INSERT INTO checkins (user_id, day, makeup) VALUES (?, ?, 1)')
+        .bind(user.id, day).run();
+      await addCredits(env, user.id, -20, '补签 ' + day);
+      const streak = await recalcStreak(env, user.id);
+      return json({ ok: true, streak });
+    }
+
+    /* ---------- 翻车现场墙 ---------- */
+    if (path === 'fails' && method === 'GET') {
+      const sort = new URL(request.url).searchParams.get('sort') || 'new';
+      const order = sort === 'hot_week'
+        ? 'f.likes DESC, f.id DESC'
+        : sort === 'hot' ? 'f.likes DESC, f.id DESC' : 'f.id DESC';
+      const where = sort === 'hot_week' ? "AND f.created_at >= datetime('now', '-7 days')" : '';
+      const { results } = await env.DB.prepare(
+        `SELECT f.id, f.prompt, f.result, f.remark, f.likes, f.created_at, u.nickname
+         FROM fail_posts f JOIN users u ON u.id = f.user_id
+         WHERE 1=1 ${where} ORDER BY ${order} LIMIT 30`
+      ).all();
+      const { results: liked } = await env.DB.prepare(
+        'SELECT post_id FROM fail_likes WHERE user_id = ?'
+      ).bind(user.id).all();
+      return json({ posts: results, liked: liked.map(x => x.post_id) });
+    }
+
+    if (path === 'fails' && method === 'POST') {
+      const { prompt: p, result, remark } = await body(request);
+      if (!p || !result) return err('Prompt 和翻车结果都要填');
+      await env.DB.prepare(
+        'INSERT INTO fail_posts (user_id, prompt, result, remark) VALUES (?, ?, ?, ?)'
+      ).bind(user.id, String(p).slice(0, 200), String(result).slice(0, 500),
+             String(remark || '').slice(0, 50)).run();
+      await checkBadges(env, user.id);
+      return json({ ok: true });
+    }
+
+    if (path === 'fails/like' && method === 'POST') {
+      const { id } = await body(request);
+      const dup = await env.DB.prepare('SELECT 1 FROM fail_likes WHERE user_id = ? AND post_id = ?')
+        .bind(user.id, id).first();
+      if (dup) return err('已经点过赞了');
+      await env.DB.prepare('INSERT INTO fail_likes (user_id, post_id) VALUES (?, ?)').bind(user.id, id).run();
+      await env.DB.prepare('UPDATE fail_posts SET likes = likes + 1 WHERE id = ?').bind(id).run();
+      const row = await env.DB.prepare('SELECT likes FROM fail_posts WHERE id = ?').bind(id).first();
+      await checkBadges(env, user.id);
+      return json({ ok: true, likes: row?.likes ?? 0 });
+    }
+
+    /* ---------- 社区广场 ---------- */
+    if (path === 'community' && method === 'GET') {
+      const sp = new URL(request.url).searchParams;
+      const sort = sp.get('sort') || 'new';
+      const kw = (sp.get('q') || '').trim();
+      const order = sort === 'hot' ? 'c.likes DESC, c.id DESC' : 'c.id DESC';
+      const like = kw ? `AND (c.title LIKE '%${kw.replace(/'/g, '')}%' OR c.content LIKE '%${kw.replace(/'/g, '')}%')` : '';
+      const { results } = await env.DB.prepare(
+        `SELECT c.id, c.title, c.content, c.tags, c.effect, c.likes, c.favs, c.created_at, u.nickname
+         FROM community_posts c JOIN users u ON u.id = c.user_id
+         WHERE 1=1 ${like} ORDER BY ${order} LIMIT 30`
+      ).all();
+      const [{ results: liked }, { results: faved }] = await Promise.all([
+        env.DB.prepare('SELECT post_id FROM community_likes WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT post_id FROM community_favs WHERE user_id = ?').bind(user.id).all()
+      ]);
+      return json({
+        posts: results,
+        liked: liked.map(x => x.post_id),
+        faved: faved.map(x => x.post_id)
+      });
+    }
+
+    if (path === 'community' && method === 'POST') {
+      const { title, content, tags, effect } = await body(request);
+      if (!title || !content) return err('标题和内容都要填');
+      const r = await env.DB.prepare(
+        'INSERT INTO community_posts (user_id, title, content, tags, effect) VALUES (?, ?, ?, ?, ?)'
+      ).bind(user.id, String(title).slice(0, 60), String(content).slice(0, 4000),
+             String(tags || '').slice(0, 80), String(effect || '').slice(0, 300)).run();
+      await addCredits(env, user.id, 30, '发布社区作品');
+      await checkBadges(env, user.id);
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    if (path === 'community/like' && method === 'POST') {
+      const { id } = await body(request);
+      const dup = await env.DB.prepare('SELECT 1 FROM community_likes WHERE user_id = ? AND post_id = ?')
+        .bind(user.id, id).first();
+      if (dup) return err('已经点过赞了');
+      await env.DB.prepare('INSERT INTO community_likes (user_id, post_id) VALUES (?, ?)').bind(user.id, id).run();
+      await env.DB.prepare('UPDATE community_posts SET likes = likes + 1 WHERE id = ?').bind(id).run();
+      const row = await env.DB.prepare('SELECT likes FROM community_posts WHERE id = ?').bind(id).first();
+      await checkBadges(env, user.id);
+      return json({ ok: true, likes: row?.likes ?? 0 });
+    }
+
+    if (path === 'community/fav' && method === 'POST') {
+      const { id } = await body(request);
+      const dup = await env.DB.prepare('SELECT 1 FROM community_favs WHERE user_id = ? AND post_id = ?')
+        .bind(user.id, id).first();
+      if (dup) {
+        await env.DB.prepare('DELETE FROM community_favs WHERE user_id = ? AND post_id = ?').bind(user.id, id).run();
+        await env.DB.prepare('UPDATE community_posts SET favs = MAX(0, favs - 1) WHERE id = ?').bind(id).run();
+        const r2 = await env.DB.prepare('SELECT favs FROM community_posts WHERE id = ?').bind(id).first();
+        return json({ ok: true, faved: false, favs: r2?.favs ?? 0 });
+      }
+      await env.DB.prepare('INSERT INTO community_favs (user_id, post_id) VALUES (?, ?)').bind(user.id, id).run();
+      await env.DB.prepare('UPDATE community_posts SET favs = favs + 1 WHERE id = ?').bind(id).run();
+      const row = await env.DB.prepare('SELECT favs FROM community_posts WHERE id = ?').bind(id).first();
+      return json({ ok: true, faved: true, favs: row?.favs ?? 0 });
+    }
+
+    if (path === 'community/comments' && method === 'GET') {
+      const id = new URL(request.url).searchParams.get('post_id');
+      const { results } = await env.DB.prepare(
+        `SELECT c.id, c.content, c.created_at, u.nickname
+         FROM community_comments c JOIN users u ON u.id = c.user_id
+         WHERE c.post_id = ? ORDER BY c.id DESC LIMIT 50`
+      ).bind(id).all();
+      return json({ comments: results });
+    }
+
+    if (path === 'community/comments' && method === 'POST') {
+      const { post_id, content } = await body(request);
+      if (!post_id || !content) return err('评论内容不能为空');
+      await env.DB.prepare(
+        'INSERT INTO community_comments (post_id, user_id, content) VALUES (?, ?, ?)'
+      ).bind(post_id, user.id, String(content).slice(0, 200)).run();
+      return json({ ok: true });
+    }
+
+    /* ---------- 批量测试 ---------- */
+    if (path === 'batch' && method === 'GET') {
+      const { results } = await env.DB.prepare(
+        'SELECT id, name, model, created_at FROM batch_runs WHERE user_id = ? ORDER BY id DESC LIMIT 10'
+      ).bind(user.id).all();
+      return json({ runs: results });
+    }
+
+    if (path === 'batch/run' && method === 'POST') {
+      const { name, versions, variables, model } = await body(request);
+      if (!Array.isArray(versions) || !versions.length) return err('至少要有一个提示词版本');
+      const varNames = Object.keys(variables || {});
+      let combos = [{}];
+      for (const n of varNames) {
+        const vals = (variables[n] || []).filter(Boolean);
+        if (!vals.length) continue;
+        const next = [];
+        for (const c of combos) for (const v of vals) next.push({ ...c, [n]: v });
+        combos = next;
+      }
+      if (!combos.length) combos = [{}];
+
+      // 控制调用量：Workers 有 CPU / 挂钟时间限制
+      const MAX = 8;
+      const jobs = [];
+      for (const v of versions.slice(0, 3)) {
+        for (const c of combos.slice(0, 4)) {
+          if (jobs.length >= MAX) break;
+          jobs.push({ version: v, vars: c });
+        }
+      }
+
+      const picked = await pickModel(env, user, model);
+      if (!picked) return fail('还没有可用的 AI 密钥，先去「我的 → API 密钥管理」添加一个');
+
+      const runRes = await env.DB.prepare(
+        'INSERT INTO batch_runs (user_id, name, model) VALUES (?, ?, ?)'
+      ).bind(user.id, String(name || '批量测试').slice(0, 40), picked.model).run();
+      const runId = runRes.meta.last_row_id;
+
+      const fill = (tpl, vars) => String(tpl || '').replace(/\$\{\s*([^}]+?)\s*\}/g,
+        (_, k) => vars[k] ?? `{${k}}`);
+
+      const one = async (job) => {
+        const t0 = Date.now();
+        const sys = fill(job.version.system, job.vars);
+        const usr = fill(job.version.user, job.vars);
+        const messages = [];
+        if (sys) messages.push({ role: 'system', content: sys });
+        messages.push({ role: 'user', content: usr });
+        try {
+          const res = await fetch(picked.endpoint, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${picked.apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: picked.model, messages, temperature: 0.7, stream: false })
+          });
+          if (!res.ok) throw new Error((await res.text()).slice(0, 120));
+          const data = await res.json();
+          const out = data.choices?.[0]?.message?.content || '';
+          const usage = data.usage || null;
+          await logUsage(env, user.id, picked.model, usage);
+          const score = await judge(env, picked, job, out);
+          await env.DB.prepare(
+            `INSERT INTO batch_results (run_id, version, vars, output, score, latency_ms)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(runId, job.version.label || 'V1', JSON.stringify(job.vars),
+                 out.slice(0, 4000), score, Date.now() - t0).run();
+          return { version: job.version.label, vars: job.vars, output: out, score, ok: true };
+        } catch (e) {
+          await env.DB.prepare(
+            `INSERT INTO batch_results (run_id, version, vars, output, score, latency_ms)
+             VALUES (?, ?, ?, ?, NULL, ?)`
+          ).bind(runId, job.version.label || 'V1', JSON.stringify(job.vars),
+                 '调用失败：' + String(e?.message || e).slice(0, 200), Date.now() - t0).run();
+          return { version: job.version.label, vars: job.vars, output: '', score: null, ok: false };
+        }
+      };
+
+      const results = await Promise.all(jobs.map(one));
+      return json({ ok: true, run_id: runId, model: picked.model, results });
+    }
+
+    /* ---------- 用户偏好（云端同步） ---------- */
+    if (path === 'settings' && method === 'GET') {
+      const row = await env.DB.prepare('SELECT * FROM user_settings WHERE user_id = ?').bind(user.id).first();
+      return json({
+        settings: row || {
+          theme: 'dark', font_size: 'medium', default_model: 'qwen-turbo',
+          language: 'zh-CN', notify: 1
+        }
+      });
+    }
+
+    if (path === 'settings' && method === 'PUT') {
+      const d = await body(request);
+      await env.DB.prepare(
+        `INSERT INTO user_settings (user_id, theme, font_size, default_model, language, notify, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(user_id) DO UPDATE SET
+           theme = COALESCE(excluded.theme, theme),
+           font_size = COALESCE(excluded.font_size, font_size),
+           default_model = COALESCE(excluded.default_model, default_model),
+           language = COALESCE(excluded.language, language),
+           notify = COALESCE(excluded.notify, notify),
+           updated_at = datetime('now')`
+      ).bind(user.id, d.theme || null, d.font_size || null, d.default_model || null,
+             d.language || null, d.notify == null ? null : (d.notify ? 1 : 0)).run();
+      return json({ ok: true });
+    }
+
+    /* ---------- 灵感值流水 ---------- */
+    if (path === 'credits' && method === 'GET') {
+      const { results } = await env.DB.prepare(
+        'SELECT amount, reason, created_at FROM credits_log WHERE user_id = ? ORDER BY id DESC LIMIT 50'
+      ).bind(user.id).all();
+      const me = await env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first();
+      return json({ balance: me.credits, logs: results });
+    }
+
+    /* ---------- 数据导出 ---------- */
+    if (path === 'export' && method === 'GET') {
+      const [prompts, usage, gacha, silly, fails, comm, badges] = await Promise.all([
+        env.DB.prepare('SELECT title, system_prompt, user_prompt, variables, model, created_at FROM prompts WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT model, prompt_tokens, completion_tokens, created_at FROM usage WHERE user_id = ? ORDER BY id DESC LIMIT 500').bind(user.id).all(),
+        env.DB.prepare('SELECT rarity, prize, created_at FROM gacha_log WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT body, likes, created_at FROM silly_posts WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT prompt, result, remark, created_at FROM fail_posts WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT title, content, tags, likes, created_at FROM community_posts WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT badge_id, created_at FROM user_badges WHERE user_id = ?').bind(user.id).all()
+      ]);
+      return json({
+        exported_at: new Date().toISOString(),
+        user: { email: user.email, nickname: user.nickname, credits: user.credits },
+        prompts: prompts.results, usage: usage.results, gacha: gacha.results,
+        silly: silly.results, fails: fails.results, community: comm.results,
+        badges: badges.results
+      });
     }
 
     /* ---------- 统计 ---------- */
@@ -513,4 +916,192 @@ const cors = () => ({
 async function monthKey(env, userId) {
   const row = await env.DB.prepare("SELECT strftime('%Y-%m', 'now') m").first();
   return row.m;
+}
+
+/* ---------- 灵感值（积分）账务 ---------- */
+async function addCredits(env, userId, amount, reason) {
+  await env.DB.prepare(
+    'UPDATE users SET credits = MAX(0, credits + ?) WHERE id = ?'
+  ).bind(amount, userId).run();
+  await env.DB.prepare(
+    'INSERT INTO credits_log (user_id, amount, reason) VALUES (?, ?, ?)'
+  ).bind(userId, amount, reason || '').run();
+  const row = await env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(userId).first();
+  return row?.credits ?? 0;
+}
+
+/* ---------- 连续打卡天数重算 ---------- */
+async function recalcStreak(env, userId) {
+  const { results } = await env.DB.prepare(
+    "SELECT day FROM checkins WHERE user_id = ? ORDER BY day DESC LIMIT 400"
+  ).bind(userId).all();
+  const set = new Set(results.map(r => r.day));
+  let streak = 0;
+  const d = new Date();
+  // 今天没签不算断，从昨天开始回溯也能接上
+  if (!set.has(fmtDay(d))) d.setDate(d.getDate() - 1);
+  for (;;) {
+    const key = fmtDay(d);
+    if (!set.has(key)) break;
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  await env.DB.prepare('UPDATE users SET streak = ? WHERE id = ?').bind(streak, userId).run();
+  return streak;
+}
+
+function fmtDay(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/* ---------- 成就徽章：解锁条件全部在服务端判定 ---------- */
+async function checkBadges(env, userId) {
+  const q = async (sql, ...bind) => (await env.DB.prepare(sql).bind(...bind).first());
+  const cnt = async (sql, ...bind) => ((await q(sql, ...bind))?.n) || 0;
+
+  const stats = {
+    prompts:    await cnt('SELECT COUNT(*) n FROM prompts WHERE user_id = ?', userId),
+    calls:      await cnt('SELECT COUNT(*) n FROM usage WHERE user_id = ?', userId),
+    gacha:      await cnt('SELECT COUNT(*) n FROM gacha_log WHERE user_id = ?', userId),
+    gacha_leg:  await cnt("SELECT COUNT(*) n FROM gacha_log WHERE user_id = ? AND rarity = '传说'", userId),
+    silly:      await cnt('SELECT COUNT(*) n FROM silly_posts WHERE user_id = ?', userId),
+    koi:        await cnt('SELECT COUNT(*) n FROM koi_draws WHERE user_id = ?', userId),
+    fails:      await cnt('SELECT COUNT(*) n FROM fail_posts WHERE user_id = ?', userId),
+    community:  await cnt('SELECT COUNT(*) n FROM community_posts WHERE user_id = ?', userId),
+    comm_likes: await cnt('SELECT COALESCE(SUM(likes), 0) n FROM community_posts WHERE user_id = ?', userId),
+    wins:       await cnt('SELECT COUNT(*) n FROM arena_log WHERE user_id = ? AND my_score > ai_score', userId),
+    keys:       await cnt('SELECT COUNT(*) n FROM user_keys WHERE user_id = ?', userId),
+    streak:     (await q('SELECT streak FROM users WHERE id = ?', userId))?.streak || 0
+  };
+
+  // Bingo 连线数
+  let bingoLines = 0, bingoFull = false;
+  try {
+    const month = (await q("SELECT strftime('%Y-%m', 'now') m")).m;
+    const bs = await q('SELECT cells FROM bingo_state WHERE user_id = ? AND month = ?', userId, month);
+    if (bs?.cells) {
+      const cells = JSON.parse(bs.cells);
+      if (Array.isArray(cells) && cells.length === 25) {
+        const on = cells.map(c => !!c);
+        const lines = [];
+        for (let r = 0; r < 5; r++) lines.push([0,1,2,3,4].map(c => r * 5 + c));
+        for (let c = 0; c < 5; c++) lines.push([0,1,2,3,4].map(r => r * 5 + c));
+        lines.push([0, 6, 12, 18, 24]);
+        lines.push([4, 8, 12, 16, 20]);
+        bingoLines = lines.filter(l => l.every(i => on[i])).length;
+        bingoFull = on.every(Boolean);
+      }
+    }
+  } catch { /* bingo 状态不存在时忽略 */ }
+
+  // 竞技场赛季排名
+  let arenaRank = 999;
+  try {
+    const { results: board } = await env.DB.prepare(
+      `SELECT a.user_id,
+              COALESCE(SUM(CASE WHEN a.my_score > a.ai_score THEN 30
+                                WHEN a.my_score = a.ai_score THEN 10 ELSE 5 END), 0) points
+       FROM arena_log a WHERE a.created_at >= datetime('now', '-7 days')
+       GROUP BY a.user_id ORDER BY points DESC`
+    ).all();
+    arenaRank = board.findIndex(r => r.user_id === userId) + 1;
+    if (arenaRank === 0) arenaRank = 999;
+  } catch { /* 忽略 */ }
+
+  const RULES = {
+    first_login:     () => true,
+    prompt_5:        () => stats.prompts >= 5,
+    prompt_20:       () => stats.prompts >= 20,
+    call_50:         () => stats.calls >= 50,
+    checkin_7:       () => stats.streak >= 7,
+    checkin_30:      () => stats.streak >= 30,
+    gacha_20:        () => stats.gacha >= 20,
+    gacha_legend:    () => stats.gacha_leg >= 1,
+    silly_10:        () => stats.silly >= 10,
+    koi_30:          () => stats.koi >= 30,
+    fail_5:          () => stats.fails >= 5,
+    arena_1:         () => stats.wins >= 1,
+    arena_10:        () => stats.wins >= 10,
+    arena_season:    () => arenaRank > 0 && arenaRank <= 3,
+    bingo_line:      () => bingoLines >= 1,
+    bingo_full:      () => bingoFull,
+    community_1:     () => stats.community >= 1,
+    community_100:   () => stats.comm_likes >= 100,
+    key_owner:       () => stats.keys >= 1
+  };
+
+  const { results: owned } = await env.DB.prepare(
+    'SELECT badge_id FROM user_badges WHERE user_id = ?'
+  ).bind(userId).all();
+  const has = new Set(owned.map(o => o.badge_id));
+
+  const unlocked = [];
+  for (const [id, test] of Object.entries(RULES)) {
+    if (has.has(id)) continue;
+    let ok = false;
+    try { ok = !!test(); } catch { ok = false; }
+    if (!ok) continue;
+    await env.DB.prepare(
+      'INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)'
+    ).bind(userId, id).run();
+    unlocked.push(id);
+  }
+  return unlocked;
+}
+
+/* ---------- 选一个可用的模型：优先用户默认密钥，回退服务端内置 ---------- */
+async function pickModel(env, user, model) {
+  const krow = await env.DB.prepare(
+    'SELECT * FROM user_keys WHERE user_id = ? AND is_default = 1 ORDER BY id DESC LIMIT 1'
+  ).bind(user.id).first();
+
+  if (krow) {
+    const endpoint = resolveEndpoint(krow.provider, krow.base_url);
+    if (!endpoint) return null;
+    const apiKey = await decryptSecret(env, krow.key_enc, krow.key_iv);
+    return { endpoint, apiKey, model: model || krow.model || defaultModel(krow.provider) || 'qwen-turbo' };
+  }
+
+  if (env[AI_KEY_VAR]) {
+    return { endpoint: AI_ENDPOINT, apiKey: env[AI_KEY_VAR], model: model || 'qwen-turbo' };
+  }
+  return null;
+}
+
+/* ---------- 批量测试评分：让模型自己打分，失败则退化为启发式 ---------- */
+async function judge(env, picked, job, output) {
+  if (!output || !output.trim()) return 0;
+  const rubric = [
+    '你是提示词评测员。请只输出一个 0~10 的整数分数，不要任何解释。',
+    '评分维度：是否完整回应了任务、表达是否清晰、信息密度是否足够。',
+    '',
+    '【任务】', String(job?.version?.user || '').slice(0, 800),
+    '【变量】', JSON.stringify(job?.vars || {}),
+    '【模型输出】', String(output).slice(0, 1500)
+  ].join('\n');
+
+  try {
+    const res = await fetch(picked.endpoint, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${picked.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: picked.model,
+        messages: [{ role: 'user', content: rubric }],
+        temperature: 0, max_tokens: 8, stream: false
+      })
+    });
+    if (!res.ok) throw new Error('judge ' + res.status);
+    const data = await res.json();
+    const txt = String(data.choices?.[0]?.message?.content || '');
+    const m = txt.match(/(\d{1,2})/);
+    if (m) return Math.max(0, Math.min(10, Number(m[1])));
+  } catch { /* 落到下面的启发式 */ }
+
+  // 启发式兜底：长度适中得分高，过短或过长都扣分
+  const len = output.trim().length;
+  const score = len < 20 ? 3 : len < 80 ? 6 : len < 800 ? 8 : len < 3000 ? 7 : 6;
+  return score;
 }

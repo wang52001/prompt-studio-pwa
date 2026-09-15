@@ -98,3 +98,156 @@ CREATE TABLE IF NOT EXISTS email_codes (
   created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email, consumed, expires_at DESC);
+
+-- v4：乐园与社区全部后端化
+-- 灵感值流水
+CREATE TABLE IF NOT EXISTS credits_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  amount     INTEGER NOT NULL,
+  reason     TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credits_user ON credits_log(user_id, created_at DESC);
+
+-- 每日打卡（唯一约束保证一天只能签一次）
+CREATE TABLE IF NOT EXISTS checkins (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  day        TEXT    NOT NULL,
+  makeup     INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, day)
+);
+
+-- 沙雕生成器：词库 + 作品 + 点赞
+CREATE TABLE IF NOT EXISTS silly_words (
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  slot INTEGER NOT NULL,
+  text TEXT    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS silly_posts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  body       TEXT    NOT NULL,
+  likes      INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_silly_hot ON silly_posts(likes DESC, created_at DESC);
+CREATE TABLE IF NOT EXISTS silly_likes (
+  user_id  INTEGER NOT NULL,
+  post_id  INTEGER NOT NULL,
+  PRIMARY KEY (user_id, post_id)
+);
+
+-- 成就徽章：定义 + 用户解锁
+CREATE TABLE IF NOT EXISTS badge_defs (
+  id        TEXT PRIMARY KEY,
+  name      TEXT NOT NULL,
+  cat       TEXT NOT NULL,
+  cond      TEXT NOT NULL,
+  legendary INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id    INTEGER NOT NULL,
+  badge_id   TEXT    NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, badge_id)
+);
+
+-- 每日锦鲤：卡池 + 每日一抽
+CREATE TABLE IF NOT EXISTS koi_cards (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  body      TEXT NOT NULL,
+  fortune   TEXT NOT NULL,
+  festival  TEXT,
+  skin      TEXT
+);
+CREATE TABLE IF NOT EXISTS koi_draws (
+  user_id    INTEGER NOT NULL,
+  day        TEXT    NOT NULL,
+  card_id    INTEGER NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, day)
+);
+
+-- 翻车现场墙
+CREATE TABLE IF NOT EXISTS fail_posts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  prompt     TEXT    NOT NULL,
+  result     TEXT    NOT NULL,
+  remark     TEXT,
+  likes      INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fail_hot ON fail_posts(likes DESC, created_at DESC);
+CREATE TABLE IF NOT EXISTS fail_likes (
+  user_id INTEGER NOT NULL,
+  post_id INTEGER NOT NULL,
+  PRIMARY KEY (user_id, post_id)
+);
+
+-- 社区广场
+CREATE TABLE IF NOT EXISTS community_posts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  title      TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  tags       TEXT,
+  effect     TEXT,
+  likes      INTEGER NOT NULL DEFAULT 0,
+  favs       INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_comm_hot ON community_posts(likes DESC, created_at DESC);
+CREATE TABLE IF NOT EXISTS community_likes (
+  user_id INTEGER NOT NULL,
+  post_id INTEGER NOT NULL,
+  PRIMARY KEY (user_id, post_id)
+);
+CREATE TABLE IF NOT EXISTS community_favs (
+  user_id INTEGER NOT NULL,
+  post_id INTEGER NOT NULL,
+  PRIMARY KEY (user_id, post_id)
+);
+CREATE TABLE IF NOT EXISTS community_comments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id    INTEGER NOT NULL,
+  user_id    INTEGER NOT NULL,
+  content    TEXT    NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_comm_cmt ON community_comments(post_id, created_at);
+
+-- 批量测试
+CREATE TABLE IF NOT EXISTS batch_runs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  name       TEXT,
+  model      TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_batch_user ON batch_runs(user_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS batch_results (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     INTEGER NOT NULL,
+  version    TEXT    NOT NULL,
+  vars       TEXT,
+  output     TEXT,
+  score      REAL,
+  latency_ms INTEGER,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_batch_res ON batch_results(run_id);
+
+-- 用户偏好（云端同步）
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id       INTEGER PRIMARY KEY,
+  theme         TEXT DEFAULT 'dark',
+  font_size     TEXT DEFAULT 'medium',
+  default_model TEXT DEFAULT 'qwen-turbo',
+  language      TEXT DEFAULT 'zh-CN',
+  notify        INTEGER DEFAULT 1,
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);

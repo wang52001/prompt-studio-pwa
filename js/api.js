@@ -62,6 +62,48 @@ export const saveArena = (my, ai) => api('playground/arena', {
   method: 'POST', body: { my_score: my, ai_score: ai }
 });
 
+/* ---------------- 竞技场 ---------------- */
+export const getArenaBoard   = () => api('playground/arena/board');
+export const getArenaHistory = () => api('playground/arena/history');
+
+/* ---------------- 沙雕生成器 ---------------- */
+export const getSilly    = () => api('silly');
+export const postSilly   = (text) => api('silly', { method: 'POST', body: { body: text } });
+export const likeSilly   = (id) => api('silly/like', { method: 'POST', body: { id } });
+
+/* ---------------- 成就徽章 ---------------- */
+export const getBadges = () => api('badges');
+
+/* ---------------- 锦鲤 / 打卡 ---------------- */
+export const getKoi     = () => api('koi');
+export const checkIn    = () => api('checkin', { method: 'POST' });
+export const makeupDay  = (day) => api('koi/makeup', { method: 'POST', body: { day } });
+
+/* ---------------- 翻车现场墙 ---------------- */
+export const getFails   = (sort = 'new') => api(`fails?sort=${encodeURIComponent(sort)}`);
+export const postFail   = (p) => api('fails', { method: 'POST', body: p });
+export const likeFail   = (id) => api('fails/like', { method: 'POST', body: { id } });
+
+/* ---------------- 社区广场 ---------------- */
+export const getCommunity  = (sort = 'new', q = '') =>
+  api(`community?sort=${encodeURIComponent(sort)}&q=${encodeURIComponent(q)}`);
+export const postCommunity = (p) => api('community', { method: 'POST', body: p });
+export const likeCommunity = (id) => api('community/like', { method: 'POST', body: { id } });
+export const favCommunity  = (id) => api('community/fav', { method: 'POST', body: { id } });
+export const getComments   = (postId) => api(`community/comments?post_id=${postId}`);
+export const postComment   = (postId, content) =>
+  api('community/comments', { method: 'POST', body: { post_id: postId, content } });
+
+/* ---------------- 批量测试 ---------------- */
+export const getBatchRuns = () => api('batch');
+export const runBatch     = (p) => api('batch/run', { method: 'POST', body: p });
+
+/* ---------------- 设置 / 灵感值 / 导出 ---------------- */
+export const getSettings = () => api('settings');
+export const saveSettings = (s) => api('settings', { method: 'PUT', body: s });
+export const getCredits  = () => api('credits');
+export const exportData  = () => api('export');
+
 /* ---------------- 统计 ---------------- */
 export const getStats = () => api('stats');
 

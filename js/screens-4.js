@@ -14,7 +14,7 @@ export const screens4 = {
       ${listItem('密钥状态&nbsp;&nbsp;&nbsp;服务端托管', 'go:apikeys')}
 
       <div class="group-title">外观</div>
-      ${listItem('主题模式&nbsp;&nbsp;&nbsp;深色', 'toast')}
+      ${listItem('主题模式&nbsp;&nbsp;&nbsp;<span id="setThemeLabel">深色</span>', 'toast')}
       <div class="color-swatches mt-2">
         <div class="swatch active" style="background:#4F8CFF" data-action="theme" data-color="#4F8CFF"></div>
         <div class="swatch" style="background:#9B6DFF" data-action="theme" data-color="#9B6DFF"></div>
@@ -22,19 +22,26 @@ export const screens4 = {
         <div class="swatch" style="background:#34D399" data-action="theme" data-color="#34D399"></div>
       </div>
       <div class="mt-2"></div>
-      ${listItem('字体大小&nbsp;&nbsp;&nbsp;中', 'toast')}
+      <div class="group-title">字体大小（云端同步）</div>
+      <div class="row gap-2" id="fontTabs">
+        <span class="chip" data-set-font="small">小</span>
+        <span class="chip" data-set-font="medium">中</span>
+        <span class="chip" data-set-font="large">大</span>
+      </div>
+      <div class="group-title">消息通知</div>
+      ${listItem('新徽章 / 打卡提醒&nbsp;&nbsp;&nbsp;<span id="setNotifyLabel">开</span>', 'toggle-notify')}
 
       <div class="group-title">账户</div>
       <div class="card">
         <div class="text-sm">登录邮箱&nbsp;&nbsp;<span data-user="email">—</span></div>
       </div>
       <div class="mt-2"></div>
-      ${listItem('数据导出 / 导入', 'toast')}
+      ${listItem('数据导出（JSON）', 'export-data')}
       <div class="mt-2"></div>
       ${listItem('离线缓存管理', 'toast')}
 
       <div class="group-title">关于</div>
-      ${listItem('版本号&nbsp;&nbsp;&nbsp;v1.1.0', 'toast')}
+      ${listItem('版本号&nbsp;&nbsp;&nbsp;v1.2.0', 'toast')}
       <div class="mt-2"></div>
       ${listItem('隐私政策 / 用户协议', 'toast')}
       <div class="mt-2"></div>
@@ -99,37 +106,61 @@ export const screens4 = {
       </div>
     `)}`),
 
-  // 19 批量测试
+  // 19 批量测试（真实调用模型，结果存后端）
   batchtest: () => shell('batchtest', '', `
     ${toolbar({ title: '批量测试' })}
     ${scroll(`
       <div class="card">
-        <div class="text-sm text-bold">提示词版本（2）</div>
-        <div class="list-item prompt-version active mt-3" style="background:var(--bg)">
-          <span class="text-primary">V1&nbsp;&nbsp;简洁版</span><span class="text-muted">›</span>
-        </div>
-        <div class="list-item prompt-version mt-2" style="background:var(--bg)">
-          <span>V2&nbsp;&nbsp;带角色设定</span><span class="text-muted">›</span>
-        </div>
-      </div>
+        <div class="text-sm text-bold">提示词版本（用 \${变量名} 占位）</div>
 
-      <div class="card mt-3">
-        <div class="text-sm text-bold">测试变量（2 组 × 2 值 = 4 组合）</div>
-        <div class="row gap-2 mt-3">
-          <span class="chip" style="background:var(--surface-soft);color:var(--primary)">产品名 × 2</span>
-          <span class="chip">卖点 × 2</span>
+        <div class="mt-3">
+          <div class="text-xs text-muted">V1 · 简洁版</div>
+          <textarea class="input" id="btV1Sys" rows="2" placeholder="V1 系统提示（可留空）" style="margin-top:4px">你是一位资深文案。</textarea>
+          <textarea class="input" id="btV1User" rows="2" placeholder="V1 用户提示" style="margin-top:6px">为 \${product} 写一句 \${style} 的广告语。</textarea>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-xs text-muted">V2 · 带角色设定</div>
+          <textarea class="input" id="btV2Sys" rows="2" placeholder="V2 系统提示（可留空）" style="margin-top:4px">你是一位拿过戛纳金狮的文案总监，只说人话。</textarea>
+          <textarea class="input" id="btV2User" rows="2" placeholder="V2 用户提示" style="margin-top:6px">为 \${product} 写一句 \${style} 的广告语，20 字以内。</textarea>
         </div>
       </div>
 
       <div class="card mt-3">
-        <div class="text-sm text-bold">结果对比</div>
-        <div class="test-table text-muted mt-2">版本&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;创意&nbsp;&nbsp;&nbsp;准确&nbsp;&nbsp;&nbsp;完整&nbsp;&nbsp;AI评分</div>
-        <div class="test-table mt-2">V1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;7.2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;7.8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;6.9&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;7.3</div>
-        <div class="test-table text-success">V2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;8.6&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;8.1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;8.9&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;8.5</div>
+        <div class="text-sm text-bold">测试变量（每行一个值）</div>
+        <div class="mt-2">
+          <div class="text-xs text-muted">变量名：product</div>
+          <textarea class="input" id="btVarProduct" rows="2" style="margin-top:4px">智能保温杯
+便携咖啡机</textarea>
+        </div>
+        <div class="mt-2">
+          <div class="text-xs text-muted">变量名：style</div>
+          <textarea class="input" id="btVarStyle" rows="2" style="margin-top:4px">幽默
+极简</textarea>
+        </div>
+        <div class="text-xs text-muted mt-2">最多 3 个版本 × 4 组变量 = 8 次调用，超出部分自动截断。</div>
       </div>
 
-      <button class="btn block mt-3" data-action="toast" data-msg="批量测试正在开发中，可先用调试台手动对比">开始批量测试</button>
+      <div class="card mt-3">
+        <div class="text-sm text-bold">结果对比（AI 裁判打分 0–10）</div>
+        <div id="btResult" class="mt-2"><div class="text-xs text-muted">点下方按钮开始，结果会存到云端</div></div>
+      </div>
+
+      <button class="btn block mt-3" data-action="batch-run" id="btRun">开始批量测试</button>
+      <button class="btn ghost block mt-2" data-action="batch-history">查看历史记录</button>
       <button class="btn ghost block mt-2" data-action="go" data-target="debug">去调试台</button>
+    `)}`),
+
+  // 22 灵感值流水
+  credits: () => shell('credits', '', `
+    ${toolbar({ title: '灵感值流水' })}
+    ${scroll(`
+      <div class="card">
+        <div class="text-xs text-muted">当前余额</div>
+        <div style="font-size:26px;font-weight:700;color:var(--primary)" id="creditsBalance">—</div>
+      </div>
+      <div class="group-title">收支明细（最近 50 条）</div>
+      <div id="creditsList"><div class="text-xs text-muted">加载中…</div></div>
     `)}`),
 
   // 20 离线状态页

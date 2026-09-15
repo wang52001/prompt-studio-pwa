@@ -1,4 +1,5 @@
 // 11 – 15：成就徽章墙 / 每日锦鲤 / 翻车现场墙 / 社区广场 / 个人中心
+// 全部数据由后端 /api 提供，页面只负责渲染与交互
 import { icons } from './icons.js';
 import { shell, scroll, toolbar, listItem } from './helpers.js';
 
@@ -8,120 +9,65 @@ export const screens3 = {
     ${toolbar({ title: '成就徽章墙' })}
     <div style="padding:0 16px">
       <div class="card badge-progress">
-        <div class="text-bold">已解锁 14 / 30 枚徽章</div>
-        <div class="profile-track" style="margin-top:10px"><div class="profile-track-fill" style="width:47%"></div></div>
-        <div class="text-xs text-muted mt-2">最近解锁：连续打卡 7 天 · 扭蛋达人</div>
+        <div class="text-bold" id="badgeSummary">徽章加载中…</div>
+        <div class="profile-track" style="margin-top:10px"><div class="profile-track-fill" id="badgeBar" style="width:0%"></div></div>
+        <div class="text-xs text-muted mt-2" id="badgeLatest">—</div>
       </div>
     </div>
-    <div class="row gap-2" style="padding:0 16px 8px">
-      <span class="text-sm text-primary text-bold">全部</span>
-      <span class="text-sm text-muted">成长类</span>
-      <span class="text-sm text-muted">趣味类</span>
-      <span class="text-sm text-muted">竞技类</span>
+    <div class="row gap-2" style="padding:0 16px 8px" id="badgeTabs">
+      <span class="text-sm text-primary text-bold" data-badge-cat="all">全部</span>
+      <span class="text-sm text-muted" data-badge-cat="成长">成长类</span>
+      <span class="text-sm text-muted" data-badge-cat="趣味">趣味类</span>
+      <span class="text-sm text-muted" data-badge-cat="竞技">竞技类</span>
+      <span class="text-sm text-muted" data-badge-cat="限定">限定类</span>
     </div>
-    ${scroll(`
-      <div class="badge-row">
-        <div class="badge-tile" data-action="toast" data-msg="初出茅庐 · 完成注册即解锁">
-          <span class="badge-icon" style="background:var(--primary)"></span>初出茅庐
-        </div>
-        <div class="badge-tile" data-action="toast" data-msg="连续打卡 7 天">
-          <span class="badge-icon" style="background:var(--success)"></span>连续打卡 7 天
-        </div>
-        <div class="badge-tile" data-action="toast" data-msg="扭蛋达人 · 抽满 20 次">
-          <span class="badge-icon" style="background:var(--secondary)"></span>扭蛋达人
-        </div>
-      </div>
-      <div class="badge-row">
-        <div class="badge-tile legendary" data-action="toast" data-msg="传说 · 锦鲤王（金色边框 + 微光）">
-          <span class="badge-icon" style="background:var(--warning)"></span>传说 · 锦鲤王
-        </div>
-        <div class="badge-tile locked" data-action="toast" data-msg="未解锁：完成 1 次 Bingo 全图">
-          <span class="badge-icon" style="background:var(--border)"></span>Bingo 大师
-        </div>
-        <div class="badge-tile" data-action="toast" data-msg="竞技场十连胜">
-          <span class="badge-icon" style="background:var(--danger)"></span>竞技场十连胜
-        </div>
-      </div>
-    `)}`),
+    ${scroll(`<div id="badgeGrid"><div class="text-xs text-muted">加载中…</div></div>`)}`),
 
   // 12 每日锦鲤
   koi: () => shell('koi', '', `
     ${toolbar({ title: '每日锦鲤', right: '<span class="text-xs text-warning">连续 <span data-stat="streak">0</span> 天</span>' })}
     ${scroll(`
-      <div class="koi-card">
-        <span class="label">今日锦鲤 · 已翻开</span>
-        <div style="font-size:14px;line-height:1.7;color:var(--text)">请扮演一位阅尽千帆的深夜电台主播，用三句话安慰今天加班到现在的我。</div>
-        <span class="fortune">上上签：今天写的 prompt 都会一次通过</span>
+      <div id="koiCard">
+        <div class="koi-card">
+          <span class="label">今日锦鲤 · 加载中</span>
+          <div style="font-size:14px;line-height:1.7;color:var(--text)">正在为你翻开今日锦鲤…</div>
+        </div>
       </div>
 
       <div class="row gap-2 mt-3">
         <button class="btn flex-1" data-action="save-koi">收藏到素材库</button>
-        <button class="btn ghost flex-1" data-action="toast" data-msg="生成分享卡片">分享锦鲤</button>
+        <button class="btn ghost flex-1" data-action="checkin">今日打卡 +10</button>
       </div>
 
       <div class="koi-calendar mt-4">
-        <div class="text-xs text-muted">本月打卡 · 漏签可花 20 灵感值补签</div>
-        <div class="calendar-row">
-          <div class="calendar-day check">1</div>
-          <div class="calendar-day check">2</div>
-          <div class="calendar-day miss">3</div>
-          <div class="calendar-day check">4</div>
-          <div class="calendar-day check">5</div>
-          <div class="calendar-day check">6</div>
-          <div class="calendar-day miss">7</div>
+        <div class="text-xs text-muted">近 30 天打卡 · 漏签可花 20 灵感值补签（点格子）</div>
+        <div class="calendar-row" id="koiCalendar" style="flex-wrap:wrap">
+          <div class="text-xs text-muted">加载中…</div>
         </div>
       </div>
     `)}`),
 
   // 13 翻车现场墙
   failwall: () => shell('failwall', '', `
-    ${toolbar({ title: '翻车现场墙', right: '<button class="btn" style="height:32px;padding:0 12px;font-size:12px" data-action="toast" data-msg="投稿弹窗：选择失败回复 + 吐槽说明">投稿翻车</button>' })}
-    <div class="row gap-2" style="padding:0 16px 8px">
-      <span class="text-sm text-primary text-bold">最新</span>
-      <span class="text-sm text-muted">最热（本周）</span>
-      <span class="text-sm text-muted">最热（总榜）</span>
+    ${toolbar({ title: '翻车现场墙', right: '<button class="btn" style="height:32px;padding:0 12px;font-size:12px" data-action="fail-submit">投稿翻车</button>' })}
+    <div class="row gap-2" style="padding:0 16px 8px" id="failTabs">
+      <span class="text-sm text-primary text-bold" data-fail-sort="new">最新</span>
+      <span class="text-sm text-muted" data-fail-sort="hot_week">最热（本周）</span>
+      <span class="text-sm text-muted" data-fail-sort="hot">最热（总榜）</span>
     </div>
-    ${scroll(`
-      <div class="card fail-card">
-        <div class="text-xs text-muted">小明的 AI · 2 小时前</div>
-        <div class="text-sm text-bold mt-2">Prompt：画一只坐在沙发上的橘猫</div>
-        <div class="result mt-2">结果：生成了一只六条腿、长着人脸的橘色不明生物，沙发悬浮在半空。</div>
-        <div class="foot">赞 234&nbsp;&nbsp;&nbsp;评论 18&nbsp;&nbsp;&nbsp;收藏</div>
-      </div>
-      <div class="card fail-card">
-        <div class="text-xs text-muted">Prompt 练习生 · 昨天</div>
-        <div class="text-sm text-bold mt-2">Prompt：把这段中文翻译成地道的文言文</div>
-        <div class="result mt-2">结果：AI 自信地输出了一段看起来很像日文的东西，并表示「翻译完成」。</div>
-        <div class="foot">赞 1.1k&nbsp;&nbsp;&nbsp;评论 96&nbsp;&nbsp;&nbsp;收藏</div>
-      </div>
-    `)}`),
+    ${scroll(`<div id="failList"><div class="text-xs text-muted">加载中…</div></div>`)}`),
 
   // 14 社区广场
   community: () => shell('community', '', `
-    ${toolbar({ title: '社区广场', right: '<button class="btn" style="height:32px;padding:0 12px;font-size:12px" data-action="toast" data-msg="发布页：标题 / prompt / 标签 / 效果说明">发布</button>' })}
+    ${toolbar({ title: '社区广场', right: '<button class="btn" style="height:32px;padding:0 12px;font-size:12px" data-action="community-publish">发布</button>' })}
     <div style="padding:0 16px">
-      <div class="search-box">${icons.search}<span>搜索社区 prompt</span></div>
+      <div class="search-box">${icons.search}<input id="commSearch" placeholder="搜索社区 prompt" style="background:none;border:0;outline:none;color:var(--text);flex:1;font-size:13px"></div>
     </div>
-    <div class="row gap-2" style="padding:8px 16px">
-      <span class="text-sm text-primary text-bold">推荐</span>
-      <span class="text-sm text-muted">最新</span>
-      <span class="text-sm text-muted">热门</span>
-      <span class="text-sm text-muted">关注</span>
+    <div class="row gap-2" style="padding:8px 16px" id="commTabs">
+      <span class="text-sm text-primary text-bold" data-comm-sort="new">最新</span>
+      <span class="text-sm text-muted" data-comm-sort="hot">热门</span>
     </div>
-    ${scroll(`
-      <div class="card post-card" data-action="toast" data-msg="进入详情页">
-        <div class="text-xs text-muted">文案老司机 · Lv.5</div>
-        <div class="title mt-2">让 AI 写出不像 AI 的文案</div>
-        <div class="preview">核心是给它具体的读者画像和禁用词表，效果立竿见影，附完整 prompt…</div>
-        <div class="foot">#文案 #营销&nbsp;&nbsp;&nbsp;赞 892&nbsp;&nbsp;&nbsp;一键使用 ›</div>
-      </div>
-      <div class="card post-card" data-action="toast" data-msg="进入详情页">
-        <div class="text-xs text-muted">前端小菜鸟 · Lv.3</div>
-        <div class="title mt-2">一键生成组件文档</div>
-        <div class="preview">把组件源码丢给它，自动输出 Props 表格和使用示例，省下半天时间…</div>
-        <div class="foot">#代码 #效率&nbsp;&nbsp;&nbsp;赞 517&nbsp;&nbsp;&nbsp;一键使用 ›</div>
-      </div>
-    `)}`),
+    ${scroll(`<div id="communityList"><div class="text-xs text-muted">加载中…</div></div>`)}`),
 
   // 15 个人中心
   profile: () => shell('profile', '', `
@@ -151,11 +97,15 @@ export const screens3 = {
       ${listItem('Bingo 打卡', 'go:bingo')}
       <div class="mt-2"></div>
       ${listItem('统计分析', 'go:stats')}
+      <div class="mt-2"></div>
+      ${listItem('灵感值流水', 'go:credits')}
 
       <div class="group-title">账户</div>
       ${listItem('登录密码&nbsp;&nbsp;<span data-user="pwState">未设置</span>', 'password-sheet')}
       <div class="mt-2"></div>
       ${listItem('API 密钥管理', 'go:apikeys')}
+      <div class="mt-2"></div>
+      ${listItem('导出我的数据', 'export-data')}
       <div class="mt-2"></div>
       ${listItem('订阅状态&nbsp;&nbsp;免费版', 'toast')}
 
@@ -167,7 +117,7 @@ export const screens3 = {
       <div class="group-title">PWA</div>
       ${listItem('添加到桌面 / 离线缓存', 'install')}
       <div class="mt-2"></div>
-      ${listItem('关于 / 检查更新&nbsp;&nbsp;&nbsp;v1.1.0', 'toast')}
+      ${listItem('关于 / 检查更新&nbsp;&nbsp;&nbsp;v1.2.0', 'toast')}
 
       <button class="logout-btn mt-4" data-action="logout">退出登录</button>
     `)}`)

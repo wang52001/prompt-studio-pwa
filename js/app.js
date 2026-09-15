@@ -67,6 +67,13 @@ function apply(id) {
 
   if (id === 'apikeys') renderKeys();
   if (id === 'debug') updateModelPill();
+  if (id === 'silly') loadSilly();
+  if (id === 'badges') loadBadges();
+  if (id === 'koi') loadKoi();
+  if (id === 'failwall') loadFails();
+  if (id === 'community') loadCommunity();
+  if (id === 'credits') loadCredits();
+  if (id === 'settings') loadSettings();
 
   document.title = id === 'splash'
     ? 'Prompt Studio 提示词工坊'
@@ -944,27 +951,569 @@ function renderStats() {
   }
 }
 
-/* ================= 沙雕生成器 ================= */
-const SILLY = [
-  ['一只会用 Excel 的橘猫', '一台有中年危机的咖啡机', '刚学会上网的兵马俑', '从大厂离职的扫地机器人', '一只考过 CPA 的柯基', '穿越到现代的李白'],
-  ['用公文格式写辞职信', '写一份融资 BP', '给暗恋对象发一条微信', '策划一场公司年会', '解释什么是区块链', '写一份小区业主公约'],
-  ['参考王家卫电影风格', '用鲁迅的语气', '像小红书爆款笔记', '以宋代话本的口吻', '用脱口秀的节奏', '模仿产品发布会']
-];
+/* ================= 沙雕生成器（词库来自后端） ================= */
+const sillyState = { slots: ['', '', ''], hot: [], mine: [] };
 
-function rerollSlot(i) {
-  const el = $(`.silly-slot[data-slot="${i}"] .value`);
-  if (!el) return;
-  const bank = SILLY[i];
-  const cur = el.textContent;
-  let next = cur;
-  while (next === cur) next = bank[Math.floor(Math.random() * bank.length)];
-  el.textContent = next;
+function renderSillySlots() {
+  ['主体', '任务', '风格'].forEach((label, i) => {
+    const el = $(`.silly-slot[data-slot="${i}"] .value`);
+    if (el) el.textContent = sillyState.slots[i] || '（词库加载中）';
+  });
+  updateSilly();
 }
 
 function updateSilly() {
-  const v = [0, 1, 2].map(i => $(`.silly-slot[data-slot="${i}"] .value`)?.textContent || '');
+  const v = sillyState.slots;
   const el = $('#sillyResult');
-  if (el) el.textContent = `请让${v[0]}，${v[1]}，文风${v[2]}。`;
+  if (el && v.every(Boolean)) el.textContent = `请让${v[0]}，${v[1]}，文风${v[2]}。`;
+}
+
+async function loadSilly() {
+  try {
+    const d = await A.getSilly();
+    sillyState.slots = (d.slots || []).length === 3 ? d.slots : sillyState.slots;
+    sillyState.hot = d.hot || [];
+    sillyState.mine = d.mine || [];
+  } catch (e) {
+    toast('词库加载失败：' + e.message, 'danger');
+  }
+  renderSillySlots();
+  renderSillyHot();
+}
+
+function renderSillyHot() {
+  const box = $('#sillyHot');
+  if (!box) return;
+  const rows = sillyState.hot.length ? sillyState.hot : sillyState.mine;
+  box.innerHTML = rows.length
+    ? rows.map(p => `
+        <div class="list-item mt-2" style="height:auto;padding:12px;align-items:flex-start">
+          <div class="col gap-1 flex-1">
+            <span class="text-sm">${esc(p.body)}</span>
+            <span class="text-xs text-muted">★ ${p.likes || 0}${p.nickname ? ' · ' + esc(p.nickname) : ''}</span>
+          </div>
+          <button class="btn ghost" style="height:30px;padding:0 10px;font-size:12px"
+                  data-action="silly-like" data-id="${p.id}">点赞</button>
+        </div>`).join('')
+    : '<div class="text-xs text-muted">还没有沙雕作品，合成一条发布试试</div>';
+}
+
+/** 重新抽词：只换指定槽位，其余保持 */
+async function rerollSlot(i) {
+  try {
+    const d = await A.getSilly();
+    const s = d.slots || [];
+    if (s.length !== 3) return;
+    if (i === 'all') sillyState.slots = s;
+    else {
+      const cur = sillyState.slots[i];
+      sillyState.slots[i] = s.find(x => x !== cur) || s[i];
+    }
+  } catch (e) {
+    toast('换词失败：' + e.message, 'danger');
+    return;
+  }
+  renderSillySlots();
+}
+
+async function publishSilly() {
+  const text = $('#sillyResult')?.textContent?.trim();
+  if (!text || text.length < 4) { toast('先合成一条 Prompt', 'danger'); return; }
+  try {
+    await A.postSilly(text);
+    toast('已发布到热门榜 ✓', 'success');
+    await loadSilly();
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* ================= 成就徽章墙 ================= */
+const badgeState = { all: [], cat: 'all' };
+
+async function loadBadges(cat = badgeState.cat) {
+  badgeState.cat = cat;
+  $$('[data-badge-cat]').forEach(el => {
+    const on = el.dataset.badgeCat === cat;
+    el.className = `text-sm ${on ? 'text-primary text-bold' : 'text-muted'}`;
+  });
+  try {
+    const d = await A.getBadges();
+    badgeState.all = d.badges || [];
+    const sum = $('#badgeSummary');
+    if (sum) sum.textContent = `已解锁 ${d.unlocked} / ${d.total} 枚徽章`;
+    const bar = $('#badgeBar');
+    if (bar) bar.style.width = `${Math.round((d.unlocked / Math.max(1, d.total)) * 100)}%`;
+    renderBadgeLatest(d.new_unlocked || []);
+  } catch (e) {
+    const g = $('#badgeGrid');
+    if (g) g.innerHTML = `<div class="text-xs text-danger">加载失败：${esc(e.message)}</div>`;
+    return;
+  }
+  renderBadges();
+}
+
+function renderBadgeLatest(newOnes) {
+  const el = $('#badgeLatest');
+  if (!el) return;
+  if (!newOnes.length) {
+    el.textContent = '暂无新解锁，继续做任务吧';
+    return;
+  }
+  const names = newOnes
+    .map(id => badgeState.all.find(b => b.id === id)?.name || id)
+    .join(' · ');
+  el.innerHTML = `<span class="text-success">刚刚解锁：${esc(names)}</span>`;
+}
+
+function renderBadges() {
+  const box = $('#badgeGrid');
+  if (!box) return;
+  const list = badgeState.cat === 'all'
+    ? badgeState.all
+    : badgeState.all.filter(b => b.cat === badgeState.cat);
+  if (!list.length) { box.innerHTML = '<div class="text-xs text-muted">这个分类还没有徽章</div>'; return; }
+
+  const color = { 成长: 'var(--success)', 趣味: 'var(--secondary)', 竞技: 'var(--danger)', 限定: 'var(--primary)' };
+  let html = '';
+  for (let i = 0; i < list.length; i += 3) {
+    html += '<div class="badge-row">' + list.slice(i, i + 3).map(b => `
+      <div class="badge-tile${b.legendary && b.unlocked ? ' legendary' : ''}${b.unlocked ? '' : ' locked'}"
+           data-action="toast" data-msg="${esc(b.name)}：${esc(b.cond)}">
+        <span class="badge-icon" style="background:${b.unlocked ? (color[b.cat] || 'var(--primary)') : 'var(--border)'}"></span>${esc(b.name)}
+      </div>`).join('') + '</div>';
+  }
+  box.innerHTML = html;
+}
+
+/* ================= 每日锦鲤 / 打卡 ================= */
+const koiState = { card: null, calendar: [], credits: 0, streak: 0 };
+
+async function loadKoi() {
+  try {
+    const d = await A.getKoi();
+    koiState.card = d.card;
+    koiState.calendar = d.calendar || [];
+    koiState.credits = d.credits;
+    koiState.streak = d.streak || 0;
+    if (state.user) state.user.streak = koiState.streak;
+  } catch (e) {
+    const box = $('#koiCard');
+    if (box) box.innerHTML = `<div class="koi-card"><span class="label">加载失败</span>
+      <div style="font-size:14px;color:var(--danger)">${esc(e.message)}</div></div>`;
+    return;
+  }
+  renderKoi();
+  setText('[data-stat="streak"]', String(koiState.streak));
+}
+
+function renderKoi() {
+  const box = $('#koiCard');
+  const c = koiState.card;
+  if (box && c) {
+    box.innerHTML = `
+      <div class="koi-card">
+        <span class="label">今日锦鲤 · ${new Date().toLocaleDateString('zh-CN')}</span>
+        <div style="font-size:14px;line-height:1.7;color:var(--text)">${esc(c.body)}</div>
+        <span class="fortune">${esc(c.fortune)}</span>
+      </div>`;
+  }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const box = $('#koiCalendar');
+  if (!box) return;
+  const set = new Set(koiState.calendar.map(c => c.day));
+  const makeup = new Set(koiState.calendar.filter(c => c.makeup).map(c => c.day));
+  const days = [];
+  const today = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  box.innerHTML = days.map(day => {
+    const done = set.has(day);
+    const cls = done ? (makeup.has(day) ? 'check' : 'check') : 'miss';
+    const num = Number(day.slice(8));
+    return `<div class="calendar-day ${done ? 'check' : 'miss'}"
+      ${done ? '' : `data-action="koi-makeup" data-day="${day}"`}
+      title="${done ? '已打卡' : '点击补签（-20）'}">${num}</div>`;
+  }).join('');
+}
+
+async function doCheckin() {
+  try {
+    const r = await A.checkIn();
+    koiState.streak = r.streak;
+    setText('[data-stat="streak"]', String(r.streak));
+    toast(`打卡成功，连续 ${r.streak} 天 ✓`, 'success');
+    await loadKoi();
+    refreshStats().then(syncAll).catch(() => {});
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function doMakeup(day) {
+  try {
+    const r = await A.makeupDay(day);
+    koiState.streak = r.streak;
+    setText('[data-stat="streak"]', String(r.streak));
+    toast(`已补签 ${day}，连续 ${r.streak} 天`, 'success');
+    await loadKoi();
+    refreshStats().then(syncAll).catch(() => {});
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* ================= 翻车现场墙 ================= */
+const failState = { posts: [], liked: [], sort: 'new' };
+
+async function loadFails(sort = failState.sort) {
+  failState.sort = sort;
+  $$('[data-fail-sort]').forEach(el => {
+    const on = el.dataset.failSort === sort;
+    el.className = `text-sm ${on ? 'text-primary text-bold' : 'text-muted'}`;
+  });
+  const box = $('#failList');
+  try {
+    const d = await A.getFails(sort);
+    failState.posts = d.posts || [];
+    failState.liked = d.liked || [];
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="text-xs text-danger">加载失败：${esc(e.message)}</div>`;
+    return;
+  }
+  renderFails();
+}
+
+function renderFails() {
+  const box = $('#failList');
+  if (!box) return;
+  if (!failState.posts.length) {
+    box.innerHTML = '<div class="text-xs text-muted">还没有人投稿，来当第一个吧</div>';
+    return;
+  }
+  box.innerHTML = failState.posts.map(p => {
+    const liked = failState.liked.includes(p.id);
+    return `
+      <div class="card fail-card">
+        <div class="text-xs text-muted">${esc(p.nickname || '匿名')} · ${esc(String(p.created_at).slice(5, 16))}</div>
+        <div class="text-sm text-bold mt-2">Prompt：${esc(p.prompt)}</div>
+        <div class="result mt-2">结果：${esc(p.result)}</div>
+        ${p.remark ? `<div class="text-xs text-muted mt-2">吐槽：${esc(p.remark)}</div>` : ''}
+        <div class="foot">
+          <span data-action="fail-like" data-id="${p.id}"
+                style="color:${liked ? 'var(--primary)' : 'inherit'}">${liked ? '已赞' : '赞'} ${p.likes || 0}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function failSubmitSheet() {
+  overlay(`
+    <div class="text-bold" style="margin-bottom:12px">投稿翻车现场</div>
+    <textarea class="input" id="fsPrompt" rows="2" placeholder="你写的 Prompt"></textarea>
+    <textarea class="input mt-2" id="fsResult" rows="3" placeholder="AI 的实际输出"></textarea>
+    <input class="input mt-2" id="fsRemark" placeholder="一句话吐槽（选填，最多 50 字）" maxlength="50" />
+    <button class="btn block mt-3" data-action="do-fail-submit">提交</button>
+    <button class="btn ghost block mt-2" data-close>取消</button>`);
+}
+
+async function submitFail() {
+  const prompt = $('#fsPrompt')?.value.trim();
+  const result = $('#fsResult')?.value.trim();
+  const remark = $('#fsRemark')?.value.trim();
+  if (!prompt || !result) { toast('Prompt 和结果都要填', 'danger'); return; }
+  try {
+    await A.postFail({ prompt, result, remark });
+    closeOverlay();
+    toast('投稿成功 ✓', 'success');
+    await loadFails();
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* ================= 社区广场 ================= */
+const commState = { posts: [], liked: [], faved: [], sort: 'new', q: '' };
+
+async function loadCommunity(sort = commState.sort, q = commState.q) {
+  commState.sort = sort; commState.q = q;
+  $$('[data-comm-sort]').forEach(el => {
+    const on = el.dataset.commSort === sort;
+    el.className = `text-sm ${on ? 'text-primary text-bold' : 'text-muted'}`;
+  });
+  const box = $('#communityList');
+  try {
+    const d = await A.getCommunity(sort, q);
+    commState.posts = d.posts || [];
+    commState.liked = d.liked || [];
+    commState.faved = d.faved || [];
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="text-xs text-danger">加载失败：${esc(e.message)}</div>`;
+    return;
+  }
+  renderCommunity();
+}
+
+function renderCommunity() {
+  const box = $('#communityList');
+  if (!box) return;
+  if (!commState.posts.length) {
+    box.innerHTML = '<div class="text-xs text-muted">还没有作品，点右上角发布一篇</div>';
+    return;
+  }
+  box.innerHTML = commState.posts.map(p => {
+    const liked = commState.liked.includes(p.id);
+    const faved = commState.faved.includes(p.id);
+    return `
+      <div class="card post-card">
+        <div class="text-xs text-muted">${esc(p.nickname || '匿名')} · ${esc(String(p.created_at).slice(5, 16))}</div>
+        <div class="title mt-2">${esc(p.title)}</div>
+        <div class="preview">${esc(String(p.content).slice(0, 90))}…</div>
+        ${p.tags ? `<div class="text-xs text-muted mt-2">${esc(p.tags)}</div>` : ''}
+        <div class="foot row gap-3">
+          <span data-action="community-like" data-id="${p.id}"
+                style="color:${liked ? 'var(--primary)' : 'inherit'}">${liked ? '已赞' : '赞'} ${p.likes || 0}</span>
+          <span data-action="community-fav" data-id="${p.id}"
+                style="color:${faved ? 'var(--warning)' : 'inherit'}">${faved ? '已收藏' : '收藏'} ${p.favs || 0}</span>
+          <span data-action="community-open" data-id="${p.id}">详情 ›</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function communityPublishSheet() {
+  overlay(`
+    <div class="text-bold" style="margin-bottom:12px">发布到社区（+30 灵感值）</div>
+    <input class="input" id="cpTitle" placeholder="标题" maxlength="60" />
+    <textarea class="input mt-2" id="cpContent" rows="5" placeholder="完整 Prompt 内容"></textarea>
+    <input class="input mt-2" id="cpTags" placeholder="标签，逗号分隔，如：文案,营销" maxlength="80" />
+    <input class="input mt-2" id="cpEffect" placeholder="效果说明（选填）" maxlength="300" />
+    <button class="btn block mt-3" data-action="do-community-publish">发布</button>
+    <button class="btn ghost block mt-2" data-close>取消</button>`);
+}
+
+async function submitCommunity() {
+  const title = $('#cpTitle')?.value.trim();
+  const content = $('#cpContent')?.value.trim();
+  const tags = $('#cpTags')?.value.trim();
+  const effect = $('#cpEffect')?.value.trim();
+  if (!title || !content) { toast('标题和内容都要填', 'danger'); return; }
+  try {
+    await A.postCommunity({ title, content, tags, effect });
+    closeOverlay();
+    toast('发布成功，+30 灵感值 ✓', 'success');
+    await loadCommunity();
+    refreshStats().then(syncAll).catch(() => {});
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function openCommunityPost(id) {
+  const p = commState.posts.find(x => x.id === Number(id));
+  if (!p) return;
+  let comments = [];
+  try { comments = (await A.getComments(p.id)).comments || []; } catch { /* 忽略 */ }
+  overlay(`
+    <div class="text-bold">${esc(p.title)}</div>
+    <div class="text-xs text-muted mt-1">${esc(p.nickname || '匿名')} · ${esc(String(p.created_at).slice(5, 16))}</div>
+    <div class="card mt-3" style="max-height:260px;overflow:auto">
+      <div style="font-size:13px;line-height:1.7">${esc(p.content)}</div>
+      ${p.effect ? `<div class="text-xs text-muted mt-2">效果：${esc(p.effect)}</div>` : ''}
+    </div>
+    <div class="row gap-2 mt-3">
+      <button class="btn ghost flex-1" data-action="community-use" data-id="${p.id}">一键使用</button>
+      <button class="btn flex-1" data-action="community-like" data-id="${p.id}">点赞 ${p.likes || 0}</button>
+    </div>
+    <div class="group-title">评论（${comments.length}）</div>
+    ${comments.map(c => `<div class="text-xs mt-2"><span class="text-muted">${esc(c.nickname)}：</span>${esc(c.content)}</div>`).join('')
+      || '<div class="text-xs text-muted">还没有评论</div>'}
+    <div class="row gap-2 mt-3">
+      <input class="input flex-1" id="cmtInput" placeholder="说点什么…" maxlength="200" />
+      <button class="btn" data-action="do-comment" data-id="${p.id}">发送</button>
+    </div>
+    <button class="btn ghost block mt-2" data-close>关闭</button>`);
+}
+
+async function submitComment(id) {
+  const v = $('#cmtInput')?.value.trim();
+  if (!v) { toast('评论不能为空', 'danger'); return; }
+  try {
+    await A.postComment(id, v);
+    toast('评论已发送 ✓', 'success');
+    await openCommunityPost(id);
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function useCommunityPost(id) {
+  const p = commState.posts.find(x => x.id === Number(id));
+  if (!p) return;
+  closeOverlay();
+  try {
+    await A.createPrompt({
+      title: p.title, system_prompt: '', user_prompt: p.content,
+      variables: {}, model: state.model
+    });
+    await refreshPrompts();
+    toast('已存入我的素材库 ✓', 'success');
+    go('library');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* ================= 灵感值流水 ================= */
+async function loadCredits() {
+  try {
+    const d = await A.getCredits();
+    const b = $('#creditsBalance');
+    if (b) b.textContent = String(d.balance ?? 0);
+    const box = $('#creditsList');
+    if (!box) return;
+    const logs = d.logs || [];
+    box.innerHTML = logs.length
+      ? logs.map(l => `
+          <div class="list-item" style="height:auto;padding:12px">
+            <div class="col gap-1 flex-1">
+              <span class="text-sm">${esc(l.reason || '系统调整')}</span>
+              <span class="text-xs text-muted">${esc(String(l.created_at).slice(0, 16))}</span>
+            </div>
+            <span class="text-bold" style="color:${l.amount >= 0 ? 'var(--success)' : 'var(--danger)'}">
+              ${l.amount >= 0 ? '+' : ''}${l.amount}
+            </span>
+          </div>`).join('')
+      : '<div class="text-xs text-muted">还没有流水记录</div>';
+  } catch (e) {
+    toast('加载失败：' + e.message, 'danger');
+  }
+}
+
+/* ================= 设置（云端同步） ================= */
+const settingsState = { theme: 'dark', font_size: 'medium', default_model: 'qwen-turbo', language: 'zh-CN', notify: 1 };
+
+async function loadSettings() {
+  try {
+    const d = await A.getSettings();
+    Object.assign(settingsState, d.settings || {});
+  } catch { /* 用默认值 */ }
+  $$('[data-set-font]').forEach(el => {
+    const on = el.dataset.setFont === settingsState.font_size;
+    el.className = `chip${on ? ' active' : ''}`;
+  });
+  const nl = $('#setNotifyLabel');
+  if (nl) nl.textContent = settingsState.notify ? '开' : '关';
+}
+
+async function saveSettings(patch) {
+  Object.assign(settingsState, patch);
+  try { await A.saveSettings(patch); }
+  catch (e) { toast('保存失败：' + e.message, 'danger'); return; }
+  toast('已保存到云端 ✓', 'success');
+  loadSettings();
+}
+
+/* ================= 数据导出 ================= */
+async function exportData() {
+  try {
+    const d = await A.exportData();
+    const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `prompt-studio-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('已导出 JSON ✓', 'success');
+  } catch (e) { toast('导出失败：' + e.message, 'danger'); }
+}
+
+/* ================= 竞技场排行榜 ================= */
+async function showArenaBoard() {
+  try {
+    const d = await A.getArenaBoard();
+    const h = await A.getArenaHistory();
+    const mine = d.mine || { matches: 0, wins: 0, points: 0 };
+    overlay(`
+      <div class="text-bold">本周竞技场</div>
+      <div class="card mt-3">
+        <div class="row between text-sm"><span>我的战绩</span>
+          <span class="text-primary text-bold">${mine.points} 分</span></div>
+        <div class="text-xs text-muted mt-2">${mine.matches} 场 · 胜 ${mine.wins || 0} 场</div>
+      </div>
+      <div class="group-title">排行榜 TOP 10</div>
+      ${(d.board || []).map((r, i) => `
+        <div class="list-item mt-2">
+          <span>${i + 1}. ${esc(r.nickname || '匿名')}<span class="text-xs text-muted"> · ${r.matches}场 胜${r.wins || 0}</span></span>
+          <span class="text-bold">${r.points}</span>
+        </div>`).join('') || '<div class="text-xs text-muted">本周还没有人参赛</div>'}
+      <div class="group-title">最近战绩</div>
+      ${(h.logs || []).map(l => `
+        <div class="list-item mt-2">
+          <span class="text-xs text-muted">${esc(String(l.created_at).slice(5, 16))}</span>
+          <span>我 ${l.my_score} : ${l.ai_score} AI</span>
+        </div>`).join('') || '<div class="text-xs text-muted">还没有对战记录</div>'}
+      <button class="btn ghost block mt-3" data-close>关闭</button>`);
+  } catch (e) { toast('加载失败：' + e.message, 'danger'); }
+}
+
+/* ================= 批量测试 ================= */
+async function runBatchTest() {
+  const btn = $('#btRun');
+  const box = $('#btResult');
+  const lines = (id) => ($(id)?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+
+  const versions = [
+    { label: 'V1', system: $('#btV1Sys')?.value || '', user: $('#btV1User')?.value || '' },
+    { label: 'V2', system: $('#btV2Sys')?.value || '', user: $('#btV2User')?.value || '' }
+  ].filter(v => v.user.trim());
+
+  if (!versions.length) { toast('至少填一个版本的用户提示', 'danger'); return; }
+
+  const variables = {
+    product: lines('#btVarProduct'),
+    style: lines('#btVarStyle')
+  };
+
+  if (btn) { btn.disabled = true; btn.textContent = '正在跑…（最多 8 次调用）'; }
+  if (box) box.innerHTML = '<div class="text-xs text-muted">正在调用模型并让 AI 裁判打分，请稍候…</div>';
+
+  try {
+    const r = await A.runBatch({ name: '批量测试', versions, variables, model: state.model });
+    const groups = {};
+    (r.results || []).forEach(x => {
+      (groups[x.version] = groups[x.version] || []).push(x);
+    });
+    if (box) {
+      box.innerHTML = `
+        <div class="test-table text-muted">版本&nbsp;&nbsp;&nbsp;&nbsp;组合&nbsp;&nbsp;&nbsp;&nbsp;AI评分&nbsp;&nbsp;&nbsp;耗时&nbsp;&nbsp;&nbsp;片段</div>
+        ${Object.entries(groups).map(([v, arr]) => arr.map(x => `
+          <div class="test-table" style="font-size:11px">
+            ${esc(v)}&nbsp;&nbsp;&nbsp;${esc(Object.values(x.vars || {}).join('/') || '—')}&nbsp;&nbsp;&nbsp;
+            <span class="${(x.score ?? 0) >= 7 ? 'text-success' : 'text-warning'}">${x.score ?? '—'}</span>&nbsp;&nbsp;&nbsp;
+            ${esc(String(x.output || '').slice(0, 24))}…
+          </div>`).join('')).join('')}
+        <div class="text-xs text-muted mt-2">模型：${esc(r.model)} · 结果已存云端</div>`;
+    }
+    toast(`完成，共 ${(r.results || []).length} 组`, 'success');
+    refreshStats().then(syncAll).catch(() => {});
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="text-xs text-danger">${esc(e.message)}</div>`;
+    toast(e.message, 'danger');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '开始批量测试'; }
+  }
+}
+
+async function showBatchHistory() {
+  try {
+    const d = await A.getBatchRuns();
+    const runs = d.runs || [];
+    overlay(`
+      <div class="text-bold">历史批量测试</div>
+      ${runs.map(r => `
+        <div class="list-item mt-2" data-action="batch-open" data-id="${r.id}">
+          <div class="col gap-1">
+            <span class="text-sm">${esc(r.name || '批量测试')}</span>
+            <span class="text-xs text-muted">${esc(String(r.created_at).slice(0, 16))} · ${esc(r.model || '')}</span>
+          </div>
+          <span class="text-muted">›</span>
+        </div>`).join('') || '<div class="text-xs text-muted mt-3">还没有历史记录</div>'}
+      <button class="btn ghost block mt-3" data-close>关闭</button>`);
+  } catch (e) { toast('加载失败：' + e.message, 'danger'); }
 }
 
 /* ================= 安装到桌面 ================= */
@@ -1034,6 +1583,16 @@ document.addEventListener('click', async (e) => {
     seg.classList.add('active');
   }
 
+  // 需要重新拉数据的筛选控件
+  const bcat = e.target.closest('[data-badge-cat]');
+  if (bcat) { loadBadges(bcat.dataset.badgeCat); return; }
+  const fsort = e.target.closest('[data-fail-sort]');
+  if (fsort) { loadFails(fsort.dataset.failSort); return; }
+  const csort = e.target.closest('[data-comm-sort]');
+  if (csort) { loadCommunity(csort.dataset.commSort); return; }
+  const fontBtn = e.target.closest('[data-set-font]');
+  if (fontBtn) { saveSettings({ font_size: fontBtn.dataset.setFont }); return; }
+
   const el = e.target.closest('[data-action]');
   if (!el) return;
   let { action, msg, target, color, id } = el.dataset;
@@ -1083,18 +1642,90 @@ document.addEventListener('click', async (e) => {
     case 'gacha-history': showGachaHistory(); break;
     case 'save-prize':  closeOverlay(); quickSave('扭蛋灵感 · ' + new Date().toLocaleDateString('zh-CN'), el.dataset.text); break;
     case 'save-silly':  quickSave('沙雕灵感 · ' + new Date().toLocaleDateString('zh-CN'), $('#sillyResult')?.textContent || ''); break;
-    case 'save-koi':    quickSave('每日锦鲤 · ' + new Date().toLocaleDateString('zh-CN'), '请扮演一位阅尽千帆的深夜电台主播，用三句话安慰今天加班到现在的我。'); break;
+    case 'save-koi':    quickSave('每日锦鲤 · ' + new Date().toLocaleDateString('zh-CN'), koiState.card?.body || ''); break;
 
     case 'bingo':       toggleBingo(el); break;
     case 'bingo-reset': resetBingo(); break;
     case 'arena-play':  arenaPlay(el); break;
+    case 'arena-board': showArenaBoard(); break;
 
     case 'reroll': {
       const slot = el.dataset.slot;
-      if (slot === 'all') [0, 1, 2].forEach(rerollSlot); else rerollSlot(Number(slot));
-      updateSilly();
+      await rerollSlot(slot === 'all' ? 'all' : Number(slot));
       break;
     }
+
+    /* --- 沙雕生成器 --- */
+    case 'silly-publish': publishSilly(); break;
+    case 'silly-like': {
+      try {
+        const r = await A.likeSilly(Number(id));
+        toast(`点赞成功，当前 ${r.likes} ★`, 'success');
+        const p = sillyState.hot.find(x => x.id === Number(id));
+        if (p) p.likes = r.likes;
+        renderSillyHot();
+      } catch (err) { toast(err.message, 'danger'); }
+      break;
+    }
+
+    /* --- 成就 --- */
+    case 'badge-cat': break;
+
+    /* --- 锦鲤 / 打卡 --- */
+    case 'checkin':     doCheckin(); break;
+    case 'koi-makeup':  doMakeup(el.dataset.day); break;
+
+    /* --- 翻车墙 --- */
+    case 'fail-submit':    failSubmitSheet(); break;
+    case 'do-fail-submit': submitFail(); break;
+    case 'fail-like': {
+      try {
+        const r = await A.likeFail(Number(id));
+        failState.liked.push(Number(id));
+        const p = failState.posts.find(x => x.id === Number(id));
+        if (p) p.likes = r.likes;
+        renderFails();
+      } catch (err) { toast(err.message, 'danger'); }
+      break;
+    }
+
+    /* --- 社区 --- */
+    case 'community-publish':    communityPublishSheet(); break;
+    case 'do-community-publish': submitCommunity(); break;
+    case 'community-open':       openCommunityPost(id); break;
+    case 'community-use':        useCommunityPost(id); break;
+    case 'do-comment':           submitComment(id); break;
+    case 'community-like': {
+      try {
+        const r = await A.likeCommunity(Number(id));
+        commState.liked.push(Number(id));
+        const p = commState.posts.find(x => x.id === Number(id));
+        if (p) p.likes = r.likes;
+        renderCommunity();
+        if ($('#cmtInput')) openCommunityPost(id);
+      } catch (err) { toast(err.message, 'danger'); }
+      break;
+    }
+    case 'community-fav': {
+      try {
+        const r = await A.favCommunity(Number(id));
+        if (r.faved) commState.faved.push(Number(id));
+        else commState.faved = commState.faved.filter(x => x !== Number(id));
+        const p = commState.posts.find(x => x.id === Number(id));
+        if (p) p.favs = r.favs;
+        renderCommunity();
+        toast(r.faved ? '已收藏 ✓' : '已取消收藏', 'success');
+      } catch (err) { toast(err.message, 'danger'); }
+      break;
+    }
+
+    /* --- 设置 / 数据 --- */
+    case 'toggle-notify': saveSettings({ notify: settingsState.notify ? 0 : 1 }); break;
+    case 'export-data':   exportData(); break;
+
+    /* --- 批量测试 --- */
+    case 'batch-run':     runBatchTest(); break;
+    case 'batch-history': showBatchHistory(); break;
 
     case 'retry-connect':
       toast(navigator.onLine ? '网络已恢复 ✓' : '仍无法连接，请检查网络', navigator.onLine ? 'success' : 'danger');
@@ -1124,6 +1755,15 @@ function bindInputs() {
   });
   const search = $('#libSearch');
   if (search) search.addEventListener('input', renderLibrary);
+
+  let commTimer = null;
+  const cs = $('#commSearch');
+  if (cs) {
+    cs.addEventListener('input', () => {
+      clearTimeout(commTimer);
+      commTimer = setTimeout(() => loadCommunity(commState.sort, cs.value.trim()), 350);
+    });
+  }
 }
 
 async function boot() {

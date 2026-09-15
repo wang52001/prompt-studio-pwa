@@ -99,7 +99,7 @@ export const screens2 = {
         <button class="btn ghost flex-1" data-action="reroll" data-slot="2">换风格</button>
       </div>
       <div class="silly-actions mt-2">
-        <button class="btn ghost flex-1" data-action="toast" data-msg="已点赞，计入热门榜">太好笑了 1.2k</button>
+        <button class="btn ghost flex-1" data-action="silly-publish">发布到热门榜</button>
         <button class="btn success flex-1" data-action="save-silly">保存到素材库</button>
       </div>
 
@@ -107,12 +107,7 @@ export const screens2 = {
         <div class="editor-tab active flex-1">热门沙雕</div>
         <div class="editor-tab flex-1" data-action="go" data-target="library">我的创作</div>
       </div>
-      <div class="list-item mt-3" style="height:auto;padding:12px;align-items:flex-start">
-        <div class="col gap-1">
-          <span class="text-sm">让唐僧用 OKR 汇报取经进度</span>
-          <span class="text-xs text-muted">★ 3.4k · 社区热门</span>
-        </div>
-      </div>
+      <div id="sillyHot" class="mt-3"><div class="text-xs text-muted">加载中…</div></div>
     `)}`),
 
   // 09 竞技场
@@ -147,8 +142,8 @@ export const screens2 = {
 
       <div class="row gap-2 mt-4" style="padding:0 16px">
         <div class="editor-tab active flex-1">对战</div>
-        <div class="editor-tab flex-1" data-action="toast" data-msg="赛季排行榜：即将开放">排行</div>
-        <div class="editor-tab flex-1" data-action="toast" data-msg="历史战绩：累计写入你的账户">历史</div>
+        <div class="editor-tab flex-1" data-action="arena-board">排行</div>
+        <div class="editor-tab flex-1" data-action="arena-board">历史</div>
       </div>
     `)}`),
 
