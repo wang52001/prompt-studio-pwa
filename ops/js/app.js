@@ -39,13 +39,41 @@ function setTab(name) {
 }
 
 /* ---------------- 路由 ---------------- */
+let routeSeq = 0;          // 竞态保护：快速连点时只认最后一次导航
+let loadingTimer = null;   // 延迟骨架屏：避免快页面闪烁
+
+function armLoading(app) {
+  clearTimeout(loadingTimer);
+  // 350ms 后仍未渲染完才显示骨架：快页面不会闪，慢页面不会"点了没反应"
+  loadingTimer = setTimeout(() => {
+    render(app, `<div class="status"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
+      <div class="page">
+        <div class="sk sk-h"></div>
+        <div class="sk sk-card"></div>
+        <div class="sk sk-card"></div>
+        <div class="sk sk-card short"></div>
+      </div>`, '');
+  }, 350);
+}
+function clearLoading() {
+  clearTimeout(loadingTimer);
+  loadingTimer = null;
+}
+
 async function route() {
+  const seq = ++routeSeq;
   const hash = location.hash.replace(/^#/, '') || '/';
   const seg = hash.split('/').filter(Boolean);
   stopPoll();
   const app = document.getElementById('app');
   document.getElementById('tabbar').hidden = false;
   app.scrollTop = 0;
+  armLoading(app);
+  const done = (html, tab) => {
+    if (seq !== routeSeq) return;   // 已经有更新的导航，丢弃这次结果
+    clearLoading();
+    render(app, html, tab);
+  };
 
   try {
     if (!state.user) {
@@ -53,25 +81,25 @@ async function route() {
       state.user = user;
     }
 
-    if (!state.user) return render(app, loginScreen(), 'me');
+    if (!state.user) return done(loginScreen(), 'me');
 
     switch (seg[0]) {
-      case undefined:      setTab('home');    return render(app, await screenHome(), 'home');
-      case 'data':         setTab('data');    return render(app, await screenDatasets(), 'data');
-      case 'dataset':      setTab('data');    return render(app, await screenDataset(seg[1]), 'data');
-      case 'new':          setTab('home');    return render(app, await screenNew(), 'home');
-      case 'project':      setTab('home');    return render(app, await screenProject(seg[1]), 'home');
-      case 'run':          setTab('home');    return render(app, await screenRun(seg[1]), 'home');
-      case 'report':       setTab('home');    return render(app, await screenReport(seg[1]), 'home');
-      case 'results':      setTab('home');    return render(app, await screenResults(seg[1], seg[2] || 'fail'), 'home');
-      case 'case':         setTab('home');    return render(app, await screenCase(seg[1], seg[2]), 'home');
-      case 'diff':         setTab('library'); return render(app, await screenDiff(seg[1]), 'library');
-      case 'library':      setTab('library'); return render(app, await screenLibrary(), 'library');
-      case 'me':           setTab('me');      return render(app, await screenMe(), 'me');
-      default:             setTab('home');    return render(app, await screenHome(), 'home');
+      case undefined:      setTab('home');    return done(await screenHome(), 'home');
+      case 'data':         setTab('data');    return done(await screenDatasets(), 'data');
+      case 'dataset':      setTab('data');    return done(await screenDataset(seg[1]), 'data');
+      case 'new':          setTab('home');    return done(await screenNew(), 'home');
+      case 'project':      setTab('home');    return done(await screenProject(seg[1]), 'home');
+      case 'run':          setTab('home');    return done(await screenRun(seg[1]), 'home');
+      case 'report':       setTab('home');    return done(await screenReport(seg[1]), 'home');
+      case 'results':      setTab('home');    return done(await screenResults(seg[1], seg[2] || 'fail'), 'home');
+      case 'case':         setTab('home');    return done(await screenCase(seg[1], seg[2]), 'home');
+      case 'diff':         setTab('library'); return done(await screenDiff(seg[1]), 'library');
+      case 'library':      setTab('library'); return done(await screenLibrary(), 'library');
+      case 'me':           setTab('me');      return done(await screenMe(), 'me');
+      default:             setTab('home');    return done(await screenHome(), 'home');
     }
   } catch (e) {
-    render(app, e.offline
+    done(e.offline
       ? `<div class="empty"><b>当前处于离线状态</b>本机还没有这份数据的缓存，
            连上网络后会自动恢复。<br><br>
            <button class="btn primary" onclick="route()">重试</button></div>`

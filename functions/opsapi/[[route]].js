@@ -21,6 +21,14 @@ const num = (v, d) => {
   return Number.isFinite(n) ? n : d;
 };
 
+/** 校验数据集归属：写操作必须走这里，否则登录用户可往他人数据集塞用例 */
+async function ownedDataset(env, userId, did) {
+  return env.DB.prepare(
+    `SELECT d.* FROM ev_datasets d JOIN ev_projects p ON p.id = d.project_id
+     WHERE d.id = ? AND p.user_id = ?`
+  ).bind(did, userId).first();
+}
+
 export async function onRequest(ctx) {
   const { request, env, params, waitUntil } = ctx;
   const seg = (params.route || []).filter(Boolean);
@@ -325,6 +333,7 @@ export async function onRequest(ctx) {
     if (path.startsWith('datasets/') && path.endsWith('/cases') && method === 'POST') {
       const g = guard(); if (g) return g;
       const did = num(seg[1], 0);
+      if (!await ownedDataset(env, user.id, did)) return err('数据集不存在', 404);
       const { input, variables, expected, code } = await body(request);
       if (!String(input || '').trim()) return err('用例输入不能为空');
       const cnt = await env.DB.prepare('SELECT COUNT(*) n FROM ev_cases WHERE dataset_id = ?').bind(did).first();
@@ -340,6 +349,7 @@ export async function onRequest(ctx) {
     if (path.startsWith('datasets/') && path.endsWith('/import') && method === 'POST') {
       const g = guard(); if (g) return g;
       const did = num(seg[1], 0);
+      if (!await ownedDataset(env, user.id, did)) return err('数据集不存在', 404);
       const { rows } = await body(request);
       if (!Array.isArray(rows) || !rows.length) return err('没有可导入的用例');
       const cnt = await env.DB.prepare('SELECT COUNT(*) n FROM ev_cases WHERE dataset_id = ?').bind(did).first();
@@ -575,6 +585,7 @@ export async function onRequest(ctx) {
       const { dataset_id } = await body(request);
       const s = await env.DB.prepare('SELECT * FROM ev_shared WHERE id = ?').bind(sid).first();
       if (!s) return err('共享集不存在', 404);
+      if (!await ownedDataset(env, user.id, num(dataset_id, 0))) return err('数据集不存在', 404);
       const rows = safeJson(s.payload, []);
       const cnt = await env.DB.prepare('SELECT COUNT(*) n FROM ev_cases WHERE dataset_id = ?')
         .bind(num(dataset_id, 0)).first();

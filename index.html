@@ -64,5 +64,26 @@
   <div id="overlay" class="overlay" aria-hidden="true" data-page-node-id="s6rDliAdoHBr8Q4NlsYsCD"></div>
 
   <script type="module" src="js/app.js"></script>
+  <script>
+    /* 全局离线提示：断网时数据请求会失败，页面会退回登录态，
+       若不给提示用户会以为账号掉了 */
+    (function () {
+      let el = null;
+      function update() {
+        if (navigator.onLine) { if (el) { el.remove(); el = null; } return; }
+        if (el) return;
+        el = document.createElement('div');
+        el.id = 'net-hint';
+        el.textContent = '当前处于离线状态，数据可能无法加载';
+        el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;' +
+          'background:#2A2110;color:#FBBF24;font-size:12px;padding:8px 12px;' +
+          'text-align:center;border-bottom:1px solid #5A4218';
+        document.body.appendChild(el);
+      }
+      window.addEventListener('online', update);
+      window.addEventListener('offline', update);
+      update();
+    })();
+  </script>
 </body>
 </html>

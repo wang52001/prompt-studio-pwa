@@ -127,6 +127,14 @@ input::placeholder,textarea::placeholder{color:var(--dim)}
 .empty{text-align:center;padding:48px 20px;color:var(--dim);font-size:13px}
 .empty b{display:block;color:var(--muted);font-size:15px;margin-bottom:6px;font-weight:600}
 
+/* 骨架屏（页面渲染超过 350ms 才出现，避免快页面闪烁） */
+.sk{background:linear-gradient(90deg,#1A1D24 25%,#22262F 37%,#1A1D24 63%);
+  background-size:400% 100%;animation:sk 1.3s ease-in-out infinite;border-radius:12px}
+.sk-h{height:30px;width:45%;border-radius:8px;margin-bottom:18px}
+.sk-card{height:84px;margin-bottom:14px}
+.sk-card.short{height:48px;width:70%}
+@keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+
 /* Toast */
 .toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:99;
   background:#000;color:#fff;border:1px solid var(--line);border-radius:10px;
