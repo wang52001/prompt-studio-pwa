@@ -1,0 +1,15 @@
+{
+  "name": "PromptOps · LLM 评测与回归平台",
+  "short_name": "PromptOps",
+  "description": "给 AI 应用工程师的提示词评测与回归平台",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0F1115",
+  "theme_color": "#0F1115",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

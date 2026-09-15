@@ -18,6 +18,42 @@
 | Cloudflare Account | `0bd1c630df5e907adf68b09c0ca6b2f0` |
 | Cloudflare Zone | `e17f0499e2f59c7850704eb95e4e2bfc`（`jdhsf.top`） |
 
+## 一·二、PromptOps：LLM 评测与回归平台（同一仓库的子应用）
+
+**https://ops.jdhsf.top**（也可从主应用 `/ops/` 访问）
+
+Prompt Studio 解决「写提示词」，PromptOps 解决「证明提示词变好了」。同一套账号、同一个 D1 库、
+同一份密钥体系，独立前端 8 屏 + 独立 API（`/opsapi/*`）。
+
+| 项 | 值 |
+| --- | --- |
+| 前端 | `ops/`（index.html + css + js，hash 路由，可安装 PWA） |
+| 后端 | `functions/opsapi/[[route]].js`，引擎在 `functions/_ops.js` |
+| 域名分流 | `functions/_middleware.js`（`ops.*` 主机名改写为 `/ops/`，主域不受影响） |
+| 数据表 | `ev_projects / ev_versions / ev_datasets / ev_cases / ev_runs / ev_results / ev_shared`（建表语句 `tools/ops_schema.sql`） |
+
+核心闭环：**数据集 → 评测 → 报告 → 版本 diff**
+
+- 评分器：规则断言（包含 / 长度 / 正则 / 禁用词）、JSON Schema 校验、LLM 裁判（带扣分规则的 0–10 分）
+- 报告：总体通过率、与上次运行的 delta、基线对比、评分器分项、失败原因聚类
+- 版本 diff：两次运行的通过率 / 均分 / 耗时 / 成本对照 + 用例级「新增失败 / 已修复 / 两版均通过」
+
+两个已解决的平台级坑：
+
+1. **Cloudflare 单次调用 50 次子请求上限**：一次跑 30 条 × 2 次调用必然超限。改为分块执行
+   （带裁判 12 条/块，纯规则 20 条/块），每块结束用一次 self-fetch 调 `/opsapi/runs/:id/continue`
+   开启新调用重置计数，续跑用 `ev_runs.cont_token` 校验。
+2. **LLM 裁判只给 0 或 10**：评分提示词补上「从 10 分起扣：每违反一条硬约束扣 3 分」的扣分规则后，
+   分数才有区分度（实测从清一色 10 分变成 4/7/8 分布）。
+
+实测回归（30 条商品文案用例，qwen-plus）：
+
+| 版本 | 通过率 | 裁判均分 |
+| --- | --- | --- |
+| V1 简洁版 | 36.7% | 6.9 |
+| V2 带角色设定 | 63.3% | 6.87 |
+| V3 硬约束版 | 93.3% | 7.3 |
+
 ## 二、登录方式
 
 **主流程：邮箱验证码登录。** 输入邮箱 → 收 6 位验证码 → 登录，首次登录自动建号。

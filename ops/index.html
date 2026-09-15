@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>PromptOps · LLM 评测与回归平台</title>
+<meta name="description" content="给 AI 应用工程师的提示词评测与回归平台：数据集、评分器、评测报告、版本 diff。">
+<meta name="theme-color" content="#0F1115">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="phone">
+  <div id="app" class="app">
+    <div class="boot">
+      <div class="boot-logo">PromptOps</div>
+      <div class="boot-sub">正在加载评测台…</div>
+    </div>
+  </div>
+  <nav id="tabbar" class="tabbar" hidden>
+    <div class="pill">
+      <a class="tab" data-tab="home" href="#/"><span class="tab-ico" data-ico="chart"></span><span>评测</span></a>
+      <a class="tab" data-tab="data" href="#/data"><span class="tab-ico" data-ico="db"></span><span>数据集</span></a>
+      <a class="tab" data-tab="library" href="#/library"><span class="tab-ico" data-ico="branch"></span><span>版本</span></a>
+      <a class="tab" data-tab="me" href="#/me"><span class="tab-ico" data-ico="user"></span><span>我的</span></a>
+    </div>
+  </nav>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="./js/api.js"></script>
+<script src="./js/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>
