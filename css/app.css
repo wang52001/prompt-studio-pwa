@@ -788,6 +788,9 @@ body {
 .auth-msg.ok { color: var(--success); }
 .auth-msg.bad { color: var(--danger); }
 
+/* 组件里的 display 会盖掉 [hidden] 的默认 display:none，必须显式兜底 */
+[hidden] { display: none !important; }
+
 /* 验证码 / 密码 切换 */
 .auth-seg {
   display: flex;
