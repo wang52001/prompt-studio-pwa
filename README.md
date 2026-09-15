@@ -74,13 +74,23 @@ Token 需要的权限：`Cloudflare Pages:Edit`、`D1:Edit`、`DNS:Edit`、`Zone
 
 ### 邮件服务（Resend）
 
-`functions/_mail.js` 目前走 Resend REST API。上线前需要：
+`functions/_mail.js` 走 Resend REST API（`POST https://api.resend.com/emails`）。
 
-1. 在 [resend.com](https://resend.com) 建账号，创建 API Key
-2. 添加发信域名并按提示加 DNS 记录（DKIM 的 `resend._domainkey` TXT + `return-path` 的 `_dmarc` TXT），验证通过后才能发给任意收件人
-3. 把 Key 配到 `RESEND_API_KEY`，发信人配到 `MAIL_FROM`
+当前线上配置：
 
-未验证域名时，Resend 只能发到你注册 Resend 时用的那个邮箱，可以用来先自测。
+| 变量 | 值 |
+| --- | --- |
+| `RESEND_API_KEY` | Pages Secret |
+| `MAIL_FROM` | `Prompt Studio <no-reply@jdhsf.top>` |
+| 发信域名 | `jdhsf.top`（Resend 中已验证，sending enabled，region ap-northeast-1） |
+
+重新配 / 轮换：
+
+```bash
+printf '<new-key>' | npx wrangler pages secret put RESEND_API_KEY --project-name=prompt-studio-pwa
+```
+
+> 没有配 Key 且 `MAIL_MODE≠dev` 时，发送接口直接报错，不会假装成功，也不会把验证码泄露给前端。
 
 ## 四、后端接口
 
