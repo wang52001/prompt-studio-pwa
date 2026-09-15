@@ -902,3 +902,15 @@ select.auth-input {
 /* 素材库卡片里的删除按钮 */
 .lib-card .meta .text-danger { cursor: pointer; }
 
+/* ============================================================
+   移动端聚焦防缩放
+   iOS 在输入框字号 < 16px 时会自动放大整个页面且不会还原。
+   只在触屏小屏的聚焦态提到 16px，平时保持原设计的视觉密度。
+   ============================================================ */
+@media (pointer:coarse) and (max-width:480px) {
+  .input:focus, .textarea:focus, .auth-input:focus,
+  .title-input:focus, .search-box input:focus, select:focus {
+    font-size: 16px;
+  }
+}
+

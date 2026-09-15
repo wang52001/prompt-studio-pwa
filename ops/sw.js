@@ -1,5 +1,5 @@
 // PromptOps Service Worker：静态资源缓存优先，API 永远走网络
-const CACHE = 'promptops-v2';
+const CACHE = 'promptops-v3';
 const ASSETS = ['./', './index.html', './css/app.css', './js/api.js', './js/app.js', './manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

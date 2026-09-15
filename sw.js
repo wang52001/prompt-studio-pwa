@@ -1,7 +1,7 @@
 /* Prompt Studio PWA — Service Worker
    策略：预缓存 + 静态资源缓存优先；/api 一律走网络 */
 
-const VERSION = 'v1.2.0';
+const VERSION = 'v1.2.1';
 const CACHE = `prompt-studio-${VERSION}`;
 
 const PRECACHE = [

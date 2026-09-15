@@ -17,8 +17,7 @@ const ICONS = {
 /* ---------------- 外壳 ---------------- */
 function shell(inner, { nav = null, tab = '' } = {}) {
   const bar = nav ? `<div class="nav">${nav}</div>` : '';
-  return `<div class="status"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
-          <div class="page">${bar}${offlineBanner()}${inner}</div>`;
+  return `<div class="page">${bar}${offlineBanner()}${inner}</div>`;
 }
 
 /** 离线降级横幅：告诉用户看到的是缓存，不是"坏了" */
@@ -46,8 +45,7 @@ function armLoading(app) {
   clearTimeout(loadingTimer);
   // 350ms 后仍未渲染完才显示骨架：快页面不会闪，慢页面不会"点了没反应"
   loadingTimer = setTimeout(() => {
-    render(app, `<div class="status"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
-      <div class="page">
+    render(app, `<div class="page">
         <div class="sk sk-h"></div>
         <div class="sk sk-card"></div>
         <div class="sk sk-card"></div>

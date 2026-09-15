@@ -5,29 +5,36 @@
   --text:#E8EAED; --muted:#9AA0A6; --dim:#6B7075;
   --ok:#34D399; --bad:#F87171; --warn:#FBBF24;
   --r:14px; --r-sm:10px; --r-lg:16px;
+  /* 安全区：刘海 / 灵动岛 / 底部小白条 / 横屏侧边 */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;background:#000;color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;
-  font-size:15px;line-height:1.5}
-body{display:flex;justify-content:center;min-height:100vh}
+  font-size:15px;line-height:1.5;
+  -webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{display:flex;justify-content:center;min-height:100dvh;overscroll-behavior:none}
+@supports not (min-height:100dvh){ body{min-height:100vh} }
 
-.phone{width:100%;max-width:430px;min-height:100vh;background:var(--bg);position:relative;
-  display:flex;flex-direction:column}
-.app{flex:1;overflow-y:auto;padding-bottom:96px;-webkit-overflow-scrolling:touch}
+.phone{width:100%;max-width:430px;height:100dvh;background:var(--bg);position:relative;
+  display:flex;flex-direction:column;overflow:hidden}
+@supports not (height:100dvh){ .phone{height:100vh} }
+.app{flex:1;min-height:0;overflow-y:auto;padding-bottom:24px;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 
 /* 启动态 */
 .boot{padding:120px 24px;text-align:center}
 .boot-logo{font-size:26px;font-weight:700;letter-spacing:.5px}
 .boot-sub{margin-top:8px;color:var(--dim);font-size:13px}
 
-/* 状态栏 */
-.status{height:52px;display:flex;align-items:center;justify-content:space-between;
-  padding:0 20px;color:var(--text);font-size:14px;font-weight:500;flex:0 0 auto}
-.status .dots{display:flex;gap:4px;align-items:center;color:var(--muted)}
-.status .dots i{width:4px;height:8px;background:var(--muted);border-radius:1px;display:block}
+/* 顶部避让：真机状态栏由系统绘制，这里只留空间，不再画假状态栏 */
+.status-spacer{flex:0 0 auto;height:calc(var(--sat) + 12px);background:var(--bg);z-index:30}
 
-.page{padding:4px 20px 24px;display:flex;flex-direction:column;gap:16px}
+.page{padding:4px calc(20px + var(--sar)) 24px calc(20px + var(--sal));
+  display:flex;flex-direction:column;gap:16px}
 
 h1.title{font-size:26px;font-weight:700;margin:0}
 .subtitle{font-size:13px;color:var(--muted);margin:-10px 0 0}
@@ -78,7 +85,7 @@ h1.title{font-size:26px;font-weight:700;margin:0}
   border:1px solid var(--line);border-radius:var(--r);padding:14px}
 .field > label{font-size:12px;color:var(--muted)}
 input,select,textarea{width:100%;background:var(--panel);border:1px solid var(--line);
-  border-radius:10px;color:var(--text);font-size:15px;padding:11px 12px;font-family:inherit;outline:none}
+  border-radius:10px;color:var(--text);font-size:16px;padding:11px 12px;font-family:inherit;outline:none}
 input:focus,textarea:focus,select:focus{border-color:var(--primary)}
 textarea{min-height:90px;resize:vertical;line-height:1.6}
 input::placeholder,textarea::placeholder{color:var(--dim)}
@@ -106,8 +113,10 @@ input::placeholder,textarea::placeholder{color:var(--dim)}
 .log .l.bad{color:var(--bad)}
 
 /* 底部导航 */
-.tabbar{position:fixed;bottom:0;width:100%;max-width:430px;padding:12px;
-  background:linear-gradient(to top,var(--bg) 60%,transparent);z-index:20}
+/* 底部导航：放在文档流内而非 fixed，底部额外留出小白条安全区 */
+.tabbar{flex:0 0 auto;width:100%;
+  padding:12px calc(12px + var(--sar)) calc(12px + var(--sab)) calc(12px + var(--sal));
+  background:var(--bg);z-index:20}
 .pill{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);
   border-radius:36px;padding:4px;height:62px}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
@@ -136,7 +145,7 @@ input::placeholder,textarea::placeholder{color:var(--dim)}
 @keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
 
 /* Toast */
-.toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:99;
+.toast{position:fixed;left:50%;bottom:calc(100px + var(--sab));transform:translateX(-50%);z-index:99;
   background:#000;color:#fff;border:1px solid var(--line);border-radius:10px;
   padding:10px 16px;font-size:13px;max-width:80%;text-align:center}
 
@@ -150,3 +159,36 @@ pre.code{margin:0;background:var(--panel);border:1px solid var(--line);border-ra
   border:1px solid var(--line)}
 .tag.ok{color:var(--ok);border-color:rgba(52,211,153,.3)}
 .tag.bad{color:var(--bad);border-color:rgba(248,113,113,.3)}
+
+/* ---------- 屏幕适配 ---------- */
+
+/* 小屏安卓（360 / 375）：压缩留白，保住一行四指标 */
+@media (max-width:374px){
+  html,body{font-size:14px}
+  .page{padding:2px calc(14px + var(--sar)) 20px calc(14px + var(--sal));gap:13px}
+  h1.title{font-size:22px}
+  .big{font-size:29px} .big.sm{font-size:26px}
+  .stats{gap:7px} .stat{padding:11px 8px} .stat b{font-size:17px}
+  .card{padding:13px}
+  .btn{height:46px;font-size:14px}
+  .pill{height:56px}
+}
+
+/* 横屏：竖向空间紧张，收掉顶部避让与导航高度 */
+@media (orientation:landscape) and (max-height:520px){
+  .status-spacer{height:calc(var(--sat) + 6px)}
+  .boot{padding:56px 24px}
+  .tabbar{padding:6px calc(12px + var(--sar)) calc(6px + var(--sab)) calc(12px + var(--sal))}
+  .pill{height:48px}
+  .tab{font-size:9px;gap:2px}
+  .tab-ico,.tab-ico svg{width:16px;height:16px}
+  .toast{bottom:calc(70px + var(--sab))}
+}
+
+/* 平板 / 桌面：收成手机画框，避免内容被拉成超宽行 */
+@media (min-width:481px){
+  body{align-items:center;background:#0a0c10;padding:20px 0}
+  .phone{height:min(920px,calc(100dvh - 40px));border-radius:28px;
+    border:1px solid var(--line);box-shadow:0 20px 80px rgba(0,0,0,.6)}
+  @supports not (height:100dvh){ .phone{height:min(920px,calc(100vh - 40px))} }
+}
