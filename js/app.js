@@ -32,15 +32,23 @@ function renderAll() {
 /* ================= 路由 ================= */
 const parseHash = () => (location.hash || '').replace(/^#\/?/, '').trim() || 'splash';
 
-function go(id) {
-  if (!screens[id]) id = 'workbench';
-  const hash = `#/${id}`;
-  if (location.hash === hash) { apply(id); return; }
+/** 路由支持子路径：ops/run/8 → 页面 id = ops，子路径 run/8 交给模块自己解析 */
+const splitPath = (p) => {
+  const i = String(p).indexOf('/');
+  return i === -1 ? [p, ''] : [p.slice(0, i), p.slice(i + 1)];
+};
+
+function go(path) {
+  const [id] = splitPath(path);
+  if (!screens[id]) path = 'workbench';
+  const hash = `#/${path}`;
+  if (location.hash === hash) { apply(path); return; }
   location.hash = hash;
 }
 
-function apply(id) {
-  if (!screens[id]) id = 'workbench';
+function apply(path) {
+  let [id, sub] = splitPath(path);
+  if (!screens[id]) { id = 'workbench'; sub = ''; }
 
   // 未登录：除登录页外一律拦截
   if (!state.user && id !== 'login') { go('login'); return; }
@@ -74,6 +82,9 @@ function apply(id) {
   if (id === 'community') loadCommunity();
   if (id === 'credits') loadCredits();
   if (id === 'settings') loadSettings();
+
+  // 评测模块：子路径交给 PromptOps 自己解析（#/ops/run/8 → sub = run/8）
+  if (id === 'ops') window.OpsModule?.route(sub);
 
   document.title = id === 'splash'
     ? 'Prompt Studio 提示词工坊'
@@ -1809,6 +1820,12 @@ async function boot() {
     const regSW = () => navigator.serviceWorker.register('sw.js').catch(() => {});
     if (document.readyState === 'complete') regSW();
     else window.addEventListener('load', regSW, { once: true });
+
+    // PromptOps 已合并进主应用：注销老用户浏览器里 scope 为 /ops/ 的独立 SW，
+    // 否则它会继续拦截 /ops/ 下的静态资源，导致拿到过期的模块代码
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(r => { if (r.scope.includes('/ops/')) r.unregister().catch(() => {}); });
+    }).catch(() => {});
   }
 }
 

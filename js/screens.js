@@ -4,13 +4,14 @@ import { screens2 } from './screens-2.js';
 import { screens3 } from './screens-3.js';
 import { screens4 } from './screens-4.js';
 import { screens5 } from './screens-5.js';
+import { screens6 } from './screens-6.js';
 
 export const screens = {
-  ...screens1, ...screens2, ...screens3, ...screens4, ...screens5
+  ...screens1, ...screens2, ...screens3, ...screens4, ...screens5, ...screens6
 };
 
 // 底部 Tab 对应的页面（这些页面显示 TabBar）
-export const TAB_SCREENS = ['workbench', 'editor', 'playground', 'library', 'profile'];
+export const TAB_SCREENS = ['workbench', 'ops', 'editor', 'playground', 'library', 'profile'];
 
 export const showTabBar = (id) => TAB_SCREENS.includes(id);
 
@@ -18,6 +19,7 @@ export const TITLES = {
   splash: 'Prompt Studio',
   login: '登录 / 注册',
   workbench: '工作台',
+  ops: 'LLM 评测',
   editor: '编辑器',
   debug: 'AI 调试台',
   library: '素材库',

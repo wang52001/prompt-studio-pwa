@@ -1,7 +1,7 @@
 /* Prompt Studio PWA — Service Worker
    策略：预缓存 + 静态资源缓存优先；/api 一律走网络 */
 
-const VERSION = 'v1.2.1';
+const VERSION = 'v1.3.1';
 const CACHE = `prompt-studio-${VERSION}`;
 
 const PRECACHE = [
@@ -18,8 +18,13 @@ const PRECACHE = [
   './js/screens-3.js',
   './js/screens-4.js',
   './js/screens-5.js',
+  './js/screens-6.js',
   './js/helpers.js',
   './js/icons.js',
+  // PromptOps 模块（已合并进主应用，作为静态资源一起预缓存）
+  './ops/css/app.scoped.css',
+  './ops/js/api.js',
+  './ops/js/app.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-192.png',

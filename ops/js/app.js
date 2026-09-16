@@ -32,8 +32,24 @@ const navBar = (title, right = '') =>
   `<div class="back" onclick="history.back()">${ICONS.back}</div><h2>${esc(title)}</h2>
    <div class="act">${right || '<span></span>'}</div>`;
 
+/* 合并进主应用后，容器由主应用的屏幕提供（独立访问时回退到原来的 id） */
+const opsAppEl    = () => document.getElementById('opsApp') || document.getElementById('app');
+const opsNavEl    = () => document.getElementById('opsNav') || document.getElementById('tabbar');
+const opsScrollEl = () => document.querySelector('.screen[data-screen="ops"] .screen-scroll') || opsAppEl();
+
+/** hash 是否指向评测模块（#/ops 或 #/ops/xxx） */
+function isOpsHash() {
+  const h = (location.hash || '').replace(/^#\/?/, '');
+  return h === 'ops' || h.startsWith('ops/');
+}
+/** 取出 ops 之后的子路径：#/ops/run/8 → run/8 */
+function opsSubPath() {
+  const h = (location.hash || '').replace(/^#\/?/, '');
+  return h.startsWith('ops') ? h.slice(3) : '';
+}
+
 function setTab(name) {
-  document.querySelectorAll('#tabbar .tab').forEach(a =>
+  document.querySelectorAll('#opsNav .ops-nav-item, #tabbar .tab').forEach(a =>
     a.classList.toggle('on', a.dataset.tab === name));
 }
 
@@ -58,14 +74,19 @@ function clearLoading() {
   loadingTimer = null;
 }
 
-async function route() {
+async function route(sub) {
+  // 主应用会直接把子路径传进来；hashchange / 内联 onclick 调用则回退到读 hash
+  if (typeof sub !== 'string') sub = opsSubPath();
+  if (!isOpsHash()) { stopPoll(); return; }   // 不在评测模块里，交给主应用处理
   const seq = ++routeSeq;
-  const hash = location.hash.replace(/^#/, '') || '/';
-  const seg = hash.split('/').filter(Boolean);
+  const seg = sub.split('/').filter(Boolean);
   stopPoll();
-  const app = document.getElementById('app');
-  document.getElementById('tabbar').hidden = false;
-  app.scrollTop = 0;
+  const app = opsAppEl();
+  if (!app) return;
+  const nav = opsNavEl();
+  if (nav) nav.hidden = false;
+  const sc = opsScrollEl();
+  if (sc) sc.scrollTop = 0;
   armLoading(app);
   const done = (html, tab) => {
     if (seq !== routeSeq) return;   // 已经有更新的导航，丢弃这次结果
@@ -163,7 +184,7 @@ async function screenHome() {
     const when = p.status === 'running' ? '<span class="blue t12">运行中</span>' : ago(p.finished_at);
     return `<div class="item" onclick="location.hash='#/report/${p.run_id}'">
       <div class="t15 semi">${esc(p.name)}</div>
-      <div class="meta">${esc(p.run_no)} · ${esc(when)} · ${esc(p.model)}${p.version_label !== '-' ? ' · ' + esc(p.version_label) : ''}</div>
+      <div class="meta">${esc(p.run_no)} · ${when} · ${esc(p.model)}${p.version_label !== '-' ? ' · ' + esc(p.version_label) : ''}</div>
       <div class="row" style="margin-top:2px">${rateTxt}${delta}</div>
     </div>`;
   }).join('');
@@ -650,8 +671,22 @@ async function saveKey() {
 async function doLogout() { await post('auth/logout'); state.user = null; location.hash = '#/me'; route(); }
 
 /* ---------------- 启动 ---------------- */
-window.addEventListener('hashchange', route);
-window.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('#tabbar .tab-ico').forEach(el => { el.innerHTML = ICONS[el.dataset.ico]; });
-  route();
-});
+/* 合并进主应用后不再自己 boot：由主应用把 #/ops/* 的子路径分发给 OpsModule.route()。
+   直接打开独立 /ops/ 页面时仍保留自启动（老链接会 301 到主应用，属兜底）。 */
+let navIconsDone = false;
+function fillNavIcons() {
+  if (navIconsDone) return;
+  const els = document.querySelectorAll('#opsNav .ops-nav-ico, #tabbar .tab-ico');
+  if (!els.length) return;
+  els.forEach(el => { el.innerHTML = ICONS[el.dataset.ico]; });
+  navIconsDone = true;
+}
+
+let opsBooted = false;
+window.OpsModule = {
+  init() { fillNavIcons(); },
+  route(sub) { opsBooted = true; fillNavIcons(); return route(sub); }
+};
+
+window.addEventListener('hashchange', () => route());
+window.addEventListener('DOMContentLoaded', () => { if (!opsBooted) route(); });

@@ -914,3 +914,14 @@ select.auth-input {
   }
 }
 
+
+/* ============================================================
+   PromptOps 模块（合并进主应用后的容器与 6 Tab 适配）
+   ============================================================ */
+.screen[data-screen="ops"] .screen-scroll { padding-top: 10px; }
+
+/* 底部 6 个 Tab：小屏上收一点图标与字号，避免挤成一团 */
+@media (max-width: 374px) {
+  .tabbar-pill .tab { font-size: 9px; gap: 2px; }
+  .tabbar-pill .tab svg { width: 16px; height: 16px; }
+}

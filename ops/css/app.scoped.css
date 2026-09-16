@@ -1,0 +1,143 @@
+/* PromptOps 作用域样式（由 ops/css/app.css 自动生成，勿手改）
+   合并进 Prompt Studio 后变量只挂在 .ops-root 上，不与主应用 :root 变量互相覆盖 */
+.ops-root{color:var(--text);font-size:15px;line-height:1.5;
+  font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans SC','Microsoft YaHei',sans-serif;
+  -webkit-text-size-adjust:100%;text-size-adjust:100%}
+.ops-root *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.ops-root .ops-body{padding-bottom:8px}
+.ops-root{
+  --bg:#0F1115; --card:#1A1D24; --panel:#15171C; --line:#2A2E37;
+  --primary:#4F8CFF; --primary-dim:#1F2740;
+  --text:#E8EAED; --muted:#9AA0A6; --dim:#6B7075;
+  --ok:#34D399; --bad:#F87171; --warn:#FBBF24;
+  --r:14px; --r-sm:10px; --r-lg:16px;
+  
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+.ops-root .boot{padding:120px 24px;text-align:center}
+.ops-root .boot-logo{font-size:26px;font-weight:700;letter-spacing:.5px}
+.ops-root .boot-sub{margin-top:8px;color:var(--dim);font-size:13px}
+/* 左右留白交给主应用 .screen-scroll，避免与 ops 自身 20px 叠加后内容过窄 */
+.ops-root .page{padding:0 0 24px;display:flex;flex-direction:column;gap:16px}
+.ops-root h1.title{font-size:26px;font-weight:700;margin:0}
+.ops-root .subtitle{font-size:13px;color:var(--muted);margin:-10px 0 0}
+.ops-root .sect{font-size:13px;color:var(--muted);font-weight:500;margin:4px 0 -4px}
+.ops-root .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;
+  display:flex;flex-direction:column;gap:8px}
+.ops-root .card.tint{background:var(--primary-dim);border-color:transparent}
+.ops-root .card.danger{border-color:var(--bad)}
+.ops-root .card.ok{border-color:var(--ok)}
+.ops-root .card.flat{background:var(--panel)}
+.ops-root .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ops-root .row .grow{flex:1;min-width:0}
+.ops-root .stats{display:flex;gap:10px}
+.ops-root .stat{flex:1;background:var(--card);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:4px}
+.ops-root .stat b{font-size:19px;font-weight:700}
+.ops-root .stat span{font-size:11px;color:var(--muted)}
+.ops-root .stats.four .stat{padding:10px}
+.ops-root .stats.four .stat b{font-size:15px}
+.ops-root .stats.four .stat span{font-size:10px}
+.ops-root .big{font-size:34px;font-weight:700;line-height:1.1}
+.ops-root .big.sm{font-size:30px}
+.ops-root .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.ops-root .ok{color:var(--ok)}
+.ops-root .bad{color:var(--bad)}
+.ops-root .warn{color:var(--warn)}
+.ops-root .blue{color:var(--primary)}
+.ops-root .muted{color:var(--muted)}
+.ops-root .dim{color:var(--dim)}
+.ops-root .t12{font-size:12px}
+.ops-root .t13{font-size:13px}
+.ops-root .t14{font-size:14px}
+.ops-root .semi{font-weight:600}
+.ops-root .bold{font-weight:700}
+.ops-root .btn{display:flex;align-items:center;justify-content:center;height:48px;border-radius:12px;
+  border:1px solid var(--line);background:var(--card);color:var(--text);font-size:15px;
+  font-weight:500;cursor:pointer;width:100%;padding:0 16px}
+.ops-root .btn.primary{background:var(--primary);border-color:transparent;color:#fff;font-weight:600}
+.ops-root .btn.ghost{background:transparent;color:var(--primary);border-color:transparent}
+.ops-root .btn.danger{color:var(--bad)}
+.ops-root .btn.sm{height:40px;font-size:14px;border-radius:10px}
+.ops-root .btn:active{opacity:.85}
+.ops-root .btn[disabled]{opacity:.5;pointer-events:none}
+.ops-root .field{display:flex;flex-direction:column;gap:8px;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.ops-root .field > label{font-size:12px;color:var(--muted)}
+.ops-root input, .ops-root select, .ops-root textarea{width:100%;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);font-size:16px;padding:11px 12px;font-family:inherit;outline:none}
+.ops-root input:focus, .ops-root textarea:focus, .ops-root select:focus{border-color:var(--primary)}
+.ops-root textarea{min-height:90px;resize:vertical;line-height:1.6}
+.ops-root input::placeholder, .ops-root textarea::placeholder{color:var(--dim)}
+.ops-root .seg{display:flex;gap:8px;flex-wrap:wrap}
+.ops-root .chip{padding:7px 12px;border-radius:8px;background:var(--card);border:1px solid var(--line);
+  font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+.ops-root .chip.on{background:var(--primary);border-color:transparent;color:#fff}
+.ops-root .item{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;
+  display:flex;flex-direction:column;gap:6px;cursor:pointer}
+.ops-root .item:active{background:#20242c}
+.ops-root .item .meta{font-size:12px;color:var(--dim)}
+.ops-root .bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.ops-root .bar > i{display:block;height:100%;background:var(--primary);border-radius:4px;transition:width .3s}
+.ops-root .log{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;
+  display:flex;flex-direction:column;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.ops-root .log .l{color:var(--muted);white-space:pre-wrap;word-break:break-all}
+.ops-root .log .l.bad{color:var(--bad)}
+.ops-root .ops-nav{flex:0 0 auto;width:100%;
+  padding:12px calc(12px + var(--sar)) calc(12px + var(--sab)) calc(12px + var(--sal));
+  background:var(--bg);z-index:20}
+.ops-root .ops-nav-pill{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);
+  border-radius:36px;padding:4px;height:62px}
+.ops-root .ops-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  border-radius:26px;color:var(--dim);text-decoration:none;font-size:10px;font-weight:500}
+.ops-root .ops-nav-item.on{background:var(--primary);color:#fff}
+.ops-root .ops-nav-ico{width:18px;height:18px;display:block}
+.ops-root .ops-nav-ico svg{width:18px;height:18px;display:block}
+.ops-root .ops-nav-item.on .ops-nav-ico svg [stroke]{stroke:#fff}
+.ops-root .nav{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ops-root .nav .back{width:20px;height:20px;cursor:pointer}
+.ops-root .nav h2{margin:0;font-size:17px;font-weight:600;flex:1;text-align:center}
+.ops-root .nav .act{font-size:13px;color:var(--primary);font-weight:500;cursor:pointer;min-width:32px;text-align:right}
+.ops-root .empty{text-align:center;padding:48px 20px;color:var(--dim);font-size:13px}
+.ops-root .empty b{display:block;color:var(--muted);font-size:15px;margin-bottom:6px;font-weight:600}
+.ops-root .sk{background:linear-gradient(90deg,#1A1D24 25%,#22262F 37%,#1A1D24 63%);
+  background-size:400% 100%;animation:sk 1.3s ease-in-out infinite;border-radius:12px}
+.ops-root .sk-h{height:30px;width:45%;border-radius:8px;margin-bottom:18px}
+.ops-root .sk-card{height:84px;margin-bottom:14px}
+.ops-root .sk-card.short{height:48px;width:70%}
+@keyframes ops-sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.ops-root .ops-toast{position:fixed;left:50%;bottom:calc(100px + var(--sab));transform:translateX(-50%);z-index:99;
+  background:#000;color:#fff;border:1px solid var(--line);border-radius:10px;
+  padding:10px 16px;font-size:13px;max-width:80%;text-align:center}
+.ops-root pre.code{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:12px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--muted);
+  white-space:pre-wrap;word-break:break-word;line-height:1.6}
+.ops-root .divider{height:1px;background:var(--line);margin:2px 0}
+.ops-root .tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--panel);color:var(--muted);
+  border:1px solid var(--line)}
+.ops-root .tag.ok{color:var(--ok);border-color:rgba(52,211,153,.3)}
+.ops-root .tag.bad{color:var(--bad);border-color:rgba(248,113,113,.3)}
+@media (max-width:374px) {.ops-root{font-size:14px}
+.ops-root .page{padding:0 0 20px;gap:13px}
+.ops-root h1.title{font-size:22px}
+.ops-root .big{font-size:29px}
+.ops-root .big.sm{font-size:26px}
+.ops-root .stats{gap:7px}
+.ops-root .stat{padding:11px 8px}
+.ops-root .stat b{font-size:17px}
+.ops-root .card{padding:13px}
+.ops-root .btn{height:46px;font-size:14px}
+.ops-root .ops-nav-pill{height:56px}}
+@media (orientation:landscape) and (max-height:520px) {.ops-root .boot{padding:56px 24px}
+.ops-root .ops-nav{padding:6px calc(12px + var(--sar)) calc(6px + var(--sab)) calc(12px + var(--sal))}
+.ops-root .ops-nav-pill{height:48px}
+.ops-root .ops-nav-item{font-size:9px;gap:2px}
+.ops-root .ops-nav-ico, .ops-root .ops-nav-ico svg{width:16px;height:16px}
+.ops-root .ops-toast{bottom:calc(70px + var(--sab))}}
+/* 合并后：内部分区导航从底部挪到页面顶部（底部已由主应用统一的 6 个 Tab 占用） */
+.ops-root .ops-nav{position:sticky;top:0;z-index:10;padding:6px 0 10px;background:var(--bg)}
+.ops-root .ops-nav-pill{height:44px;border-radius:22px}
+.ops-root .ops-nav-item{flex-direction:row;gap:6px;font-size:13px;border-radius:18px}
+.ops-root .ops-nav-ico,.ops-root .ops-nav-ico svg{width:16px;height:16px}

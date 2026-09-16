@@ -55,7 +55,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function toast(msg) {
-  const el = document.getElementById('toast');
+  const el = document.getElementById('opsToast') || document.getElementById('toast');
   if (!el) return;
   el.textContent = msg;
   el.hidden = false;
