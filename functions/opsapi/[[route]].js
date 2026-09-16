@@ -378,6 +378,12 @@ export async function onRequest(ctx) {
       if (!c) return err('用例不存在', 404);
       await env.DB.prepare('DELETE FROM ev_results WHERE case_id = ?').bind(cid).run();
       await env.DB.prepare('DELETE FROM ev_cases WHERE id = ?').bind(cid).run();
+      // 删除后重算计数，否则列表条数与数据集上的 case_count 会长期不一致
+      await env.DB.prepare(
+        `UPDATE ev_datasets SET case_count =
+           (SELECT COUNT(*) FROM ev_cases WHERE dataset_id = ?), updated_at = datetime('now')
+         WHERE id = ?`
+      ).bind(c.dataset_id, c.dataset_id).run();
       return ok({ ok: true });
     }
 
@@ -390,6 +396,16 @@ export async function onRequest(ctx) {
         .bind(pid, user.id).first();
       if (!p) return err('项目不存在', 404);
       if (!vid || !did) return err('请选择提示词版本与数据集');
+      // 版本与数据集必须同属该项目，否则可以挂载他人数据集把别人的用例读出来
+      const v = await env.DB.prepare(
+        'SELECT id FROM ev_versions WHERE id = ? AND project_id = ?'
+      ).bind(vid, pid).first();
+      if (!v) return err('提示词版本不存在', 404);
+      if (!await ownedDataset(env, user.id, did)) return err('数据集不存在', 404);
+      const ds = await env.DB.prepare(
+        'SELECT id FROM ev_datasets WHERE id = ? AND project_id = ?'
+      ).bind(did, pid).first();
+      if (!ds) return err('数据集不属于该项目', 404);
 
       const prev = await env.DB.prepare(
         `SELECT id FROM ev_runs WHERE project_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`
@@ -426,8 +442,10 @@ export async function onRequest(ctx) {
     if (path === 'runs/preview' && method === 'POST') {
       const g = guard(); if (g) return g;
       const { dataset_id, scorers } = await body(request);
+      const did = num(dataset_id, 0);
+      if (!await ownedDataset(env, user.id, did)) return err('数据集不存在', 404);
       const cnt = await env.DB.prepare('SELECT COUNT(*) n FROM ev_cases WHERE dataset_id = ?')
-        .bind(num(dataset_id, 0)).first();
+        .bind(did).first();
       const n = Math.min(cnt?.n || 0, 200);
       const calls = n * ((scorers || []).includes('llm') ? 2 : 1);
       return ok({
@@ -459,7 +477,13 @@ export async function onRequest(ctx) {
 
     if (path.startsWith('runs/') && path.endsWith('/stop') && method === 'POST') {
       const g = guard(); if (g) return g;
-      await env.DB.prepare('UPDATE ev_runs SET stop_flag = 1 WHERE id = ?').bind(num(seg[1], 0)).run();
+      const rid = num(seg[1], 0);
+      const run = await env.DB.prepare(
+        `SELECT r.id FROM ev_runs r JOIN ev_projects p ON p.id = r.project_id
+         WHERE r.id = ? AND p.user_id = ?`
+      ).bind(rid, user.id).first();
+      if (!run) return err('运行记录不存在', 404);
+      await env.DB.prepare('UPDATE ev_runs SET stop_flag = 1 WHERE id = ?').bind(rid).run();
       return ok({ ok: true });
     }
 

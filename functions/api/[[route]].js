@@ -24,6 +24,9 @@ const CODE_RESEND_SEC   = 60;   // 重发冷却（秒）
 const CODE_MAX_TRY      = 5;    // 单个码最多尝试次数
 const CODE_HOURLY_LIMIT = 10;   // 每邮箱每小时最多发几封
 
+/* 竞技场：每日最多几场胜利发放灵感值（比分由客户端上报，必须限流） */
+const ARENA_DAILY_REWARD_WINS = 5;
+
 /* 扭蛋奖池（服务端权威，防止前端伪造） */
 const GACHA_POOL = [
   { rarity: '普通', text: '你是一位有 20 年经验的米其林主厨，请用家常食材设计一道惊艳的菜。' },
@@ -317,9 +320,12 @@ export async function onRequest(ctx) {
 
     if (path === 'keys/default' && method === 'POST') {
       const { id } = await body(request);
+      // 先确认密钥存在：否则会把现有默认清空却设不上新的，导致 chat / 批量测试找不到密钥
+      const row = await env.DB.prepare('SELECT id FROM user_keys WHERE id = ? AND user_id = ?')
+        .bind(id, user.id).first();
+      if (!row) return err('密钥不存在', 404);
       await env.DB.prepare('UPDATE user_keys SET is_default = 0 WHERE user_id = ?').bind(user.id).run();
-      await env.DB.prepare('UPDATE user_keys SET is_default = 1 WHERE id = ? AND user_id = ?')
-        .bind(id, user.id).run();
+      await env.DB.prepare('UPDATE user_keys SET is_default = 1 WHERE id = ?').bind(id).run();
       return json({ ok: true });
     }
 
@@ -451,15 +457,30 @@ export async function onRequest(ctx) {
     }
 
     if (path === 'playground/arena' && method === 'POST') {
-      const { my_score, ai_score } = await body(request);
+      const raw = await body(request);
+      const my = Number(raw.my_score), ai = Number(raw.ai_score);
+      if (!Number.isFinite(my) || !Number.isFinite(ai) || my < 0 || ai < 0 || my > 9999 || ai > 9999) {
+        return err('比分不合法');
+      }
+      const my_score = Math.round(my), ai_score = Math.round(ai);
       await env.DB.prepare('INSERT INTO arena_log (user_id, my_score, ai_score) VALUES (?, ?, ?)')
-        .bind(user.id, my_score ?? 0, ai_score ?? 0).run();
-      if ((my_score ?? 0) > (ai_score ?? 0)) {
-        await addCredits(env, user.id, 20, '竞技场获胜');
+        .bind(user.id, my_score, ai_score).run();
+
+      // 比分由客户端上报，若不限量发奖可直接无限刷灵感值：每日最多 5 场胜利计奖
+      let reward = 0;
+      if (my_score > ai_score) {
+        const w = await env.DB.prepare(
+          `SELECT COUNT(*) n FROM arena_log
+           WHERE user_id = ? AND my_score > ai_score AND created_at >= date('now')`
+        ).bind(user.id).first();
+        if ((w?.n || 0) <= ARENA_DAILY_REWARD_WINS) {
+          reward = 20;
+          await addCredits(env, user.id, reward, '竞技场获胜');
+        }
       }
       await checkBadges(env, user.id);
       const row = await env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first();
-      return json({ ok: true, credits: row.credits });
+      return json({ ok: true, credits: row.credits, reward });
     }
 
     /* ---------- 竞技场：排行榜 / 历史 ---------- */
@@ -523,6 +544,9 @@ export async function onRequest(ctx) {
 
     if (path === 'silly/like' && method === 'POST') {
       const { id } = await body(request);
+      if (!await env.DB.prepare('SELECT 1 FROM silly_posts WHERE id = ?').bind(id).first()) {
+        return err('内容不存在', 404);
+      }
       const dup = await env.DB.prepare('SELECT 1 FROM silly_likes WHERE user_id = ? AND post_id = ?')
         .bind(user.id, id).first();
       if (dup) return err('已经点过赞了');
@@ -588,6 +612,10 @@ export async function onRequest(ctx) {
     if (path === 'koi/makeup' && method === 'POST') {
       const { day } = await body(request);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) return err('日期格式不对');
+      const today = (await env.DB.prepare("SELECT date('now') d").first()).d;
+      if (String(day) >= today) return err('今天及以后的日期请直接打卡，不用补签');
+      const floor = (await env.DB.prepare("SELECT date('now', '-29 days') d").first()).d;
+      if (String(day) < floor) return err('只能补签最近 30 天内的日期');
       const ex = await env.DB.prepare('SELECT id FROM checkins WHERE user_id = ? AND day = ?')
         .bind(user.id, day).first();
       if (ex) return fail('这天已经签过了');
@@ -631,6 +659,9 @@ export async function onRequest(ctx) {
 
     if (path === 'fails/like' && method === 'POST') {
       const { id } = await body(request);
+      if (!await env.DB.prepare('SELECT 1 FROM fail_posts WHERE id = ?').bind(id).first()) {
+        return err('内容不存在', 404);
+      }
       const dup = await env.DB.prepare('SELECT 1 FROM fail_likes WHERE user_id = ? AND post_id = ?')
         .bind(user.id, id).first();
       if (dup) return err('已经点过赞了');
@@ -678,6 +709,9 @@ export async function onRequest(ctx) {
 
     if (path === 'community/like' && method === 'POST') {
       const { id } = await body(request);
+      if (!await env.DB.prepare('SELECT 1 FROM community_posts WHERE id = ?').bind(id).first()) {
+        return err('作品不存在', 404);
+      }
       const dup = await env.DB.prepare('SELECT 1 FROM community_likes WHERE user_id = ? AND post_id = ?')
         .bind(user.id, id).first();
       if (dup) return err('已经点过赞了');
@@ -690,6 +724,9 @@ export async function onRequest(ctx) {
 
     if (path === 'community/fav' && method === 'POST') {
       const { id } = await body(request);
+      if (!await env.DB.prepare('SELECT 1 FROM community_posts WHERE id = ?').bind(id).first()) {
+        return err('作品不存在', 404);
+      }
       const dup = await env.DB.prepare('SELECT 1 FROM community_favs WHERE user_id = ? AND post_id = ?')
         .bind(user.id, id).first();
       if (dup) {
@@ -717,6 +754,9 @@ export async function onRequest(ctx) {
     if (path === 'community/comments' && method === 'POST') {
       const { post_id, content } = await body(request);
       if (!post_id || !content) return err('评论内容不能为空');
+      if (!await env.DB.prepare('SELECT 1 FROM community_posts WHERE id = ?').bind(post_id).first()) {
+        return err('作品不存在', 404);
+      }
       await env.DB.prepare(
         'INSERT INTO community_comments (post_id, user_id, content) VALUES (?, ?, ?)'
       ).bind(post_id, user.id, String(content).slice(0, 200)).run();
