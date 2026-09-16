@@ -1,0 +1,11 @@
+# 只上传运行时需要的文件，开发/运维脚本不进 Pages
+.git/
+.github/
+.wrangler/
+tools/
+node_modules/
+__pycache__/
+*.py
+*.pyc
+.DS_Store
+*.md
