@@ -4,3 +4,5 @@ __pycache__/
 .wrangler/
 .dev.vars
 node_modules/
+# 本地部署凭据（Cloudflare API Token，勿提交）
+.cf_token
