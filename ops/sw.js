@@ -1,36 +1,23 @@
-// PromptOps Service Worker：静态资源缓存优先，API 永远走网络
-const CACHE = 'promptops-v3';
-const ASSETS = ['./', './index.html', './css/app.css', './js/api.js', './js/app.js', './manifest.webmanifest'];
+// PromptOps 已并入 Prompt Studio，/ops/ 这个 scope 不再需要 Service Worker。
+//
+// 为什么保留文件而不是删掉：
+//   旧版 SW 的 scope 是 /ops/，会拦截 /ops/** 下所有 GET 请求，而合并后主应用
+//   也要加载 /ops/js/app.js、/ops/js/api.js、/ops/css/app.scoped.css。
+//   直接删除文件的话，浏览器更新检查拿到 404，旧 SW 不会退出，
+//   反而会继续给主应用喂缓存里的旧版 ops 代码。
+//   保留一个「自注销」版本，才能让已安装的旧 SW 更新过来并干净退出。
+//
+// 升级后本 SW 没有 fetch 监听，请求一律透传给网络，不再缓存。
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
-});
-// 只清理自己的缓存：本站同时存在主应用 SW（scope /，缓存名 prompt-studio-*），
-// 若按"非本版本即删除"过滤，两个 SW 会互相清掉对方的缓存。
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then(ks => Promise.all(ks.filter(k => k.startsWith('promptops-') && k !== CACHE)
-        .map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
-/* stale-while-revalidate：
-   先返回缓存保证秒开与离线可用，同时后台拉取写入缓存，下次打开即为新版。
-   纯 cache-first 会让用户永远停在旧代码上。 */
-self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.pathname.includes('/opsapi/')) return;
+self.addEventListener('install', () => self.skipWaiting());
 
-  e.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const hit = await cache.match(e.request);
-    const net = fetch(e.request)
-      .then((res) => {
-        if (res && res.status === 200) cache.put(e.request, res.clone()).catch(() => {});
-        return res;
-      })
-      .catch(() => null);
-    return hit || (await net) || (await cache.match('./index.html'));
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    // 只清自己名下的缓存，不动主应用的 prompt-studio-*
+    const keys = await caches.keys();
+    await Promise.all(
+      keys.filter((k) => k.startsWith('promptops-')).map((k) => caches.delete(k))
+    );
+    await self.registration.unregister();
   })());
 });
