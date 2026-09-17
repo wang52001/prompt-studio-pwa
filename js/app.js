@@ -386,28 +386,90 @@ function renderRecent() {
 }
 
 /* ================= 素材库 ================= */
+
+/* tags 在库里是 JSON 字符串，统一解析成数组 */
+const parseTags = (p) => {
+  const raw = p?.tags;
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === 'string' && raw.trim()) {
+    try { const v = JSON.parse(raw); return Array.isArray(v) ? v.filter(Boolean) : []; }
+    catch { return []; }
+  }
+  return [];
+};
+const parseFolder = (p) => (p?.folder || '').trim();
+
+/* 当前选中的筛选值，形如 'f:工作'（文件夹）或 't:文案'（标签） */
+let libFilter = 'all';
+
+function libFilterChips() {
+  const folders = [...new Set(state.prompts.map(parseFolder).filter(Boolean))].sort();
+  const tags = [...new Set(state.prompts.flatMap(parseTags))].sort();
+  const chip = (val, label, count) => `
+    <span class="chip${libFilter === val ? ' active' : ''}" data-action="lib-filter" data-val="${esc(val)}">
+      ${esc(label)}${count == null ? '' : ` <span style="opacity:.65">${count}</span>`}
+    </span>`;
+  return [
+    chip('all', '全部', state.prompts.length),
+    ...folders.map(f => chip('f:' + f, '📁 ' + f, state.prompts.filter(p => parseFolder(p) === f).length)),
+    ...tags.map(t => chip('t:' + t, '#' + t, state.prompts.filter(p => parseTags(p).includes(t)).length)),
+  ].join('');
+}
+
+function libMatch(p) {
+  if (libFilter.startsWith('f:')) return parseFolder(p) === libFilter.slice(2);
+  if (libFilter.startsWith('t:')) return parseTags(p).includes(libFilter.slice(2));
+  return true;
+}
+
 function renderLibrary() {
   const grid = $('#libGrid');
   if (!grid) return;
   const q = ($('#libSearch')?.value || '').trim().toLowerCase();
-  if ($('#libCount')) $('#libCount').textContent = `${state.prompts.length} 条`;
 
-  const list = state.prompts.filter(p =>
-    !q || [p.title, p.system_prompt, p.user_prompt].filter(Boolean).join(' ').toLowerCase().includes(q));
+  // 当前筛选如果已经没有对应内容了（比如最后一个标签被删），自动回到全部
+  const activeLeft = state.prompts.some(libMatch);
+  if (!activeLeft && libFilter !== 'all') libFilter = 'all';
 
-  if (!list.length) {
-    grid.innerHTML = `<div class="text-xs text-muted">${
+  if ($('#libFilters')) $('#libFilters').innerHTML = libFilterChips();
+
+  const hits = state.prompts.filter(p =>
+    libMatch(p) &&
+    (!q || [p.title, p.system_prompt, p.user_prompt, parseTags(p).join(' ')]
+      .filter(Boolean).join(' ').toLowerCase().includes(q)));
+
+  if ($('#libCount')) {
+    $('#libCount').textContent =
+      hits.length === state.prompts.length ? `${state.prompts.length} 条` : `${hits.length} / ${state.prompts.length} 条`;
+  }
+
+  if (!hits.length) {
+    grid.innerHTML = `<div class="text-xs text-muted" style="grid-column:1/-1">${
       state.prompts.length ? '没有匹配的提示词' : '还没有提示词，点下面「新建提示词」'}</div>`;
     return;
   }
-  grid.innerHTML = list.map(p => `
+
+  // 置顶的在前面，其余按更新时间
+  const list = [...hits].sort((a, b) =>
+    (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
+  grid.innerHTML = list.map(p => {
+    const tags = parseTags(p);
+    const folder = parseFolder(p);
+    return `
     <div class="lib-card" data-action="open-prompt" data-id="${p.id}">
-      <span class="title">${esc(p.title)}</span>
-      <span class="preview">${esc((p.system_prompt || p.user_prompt || '（空）').slice(0, 60))}</span>
+      <span class="title">${p.pinned ? '<span style="color:var(--primary)">📌 </span>' : ''}${esc(p.title)}</span>
+      <span class="preview">${esc((p.system_prompt || p.user_prompt || '（空）').slice(0, 42))}</span>
+      <span style="display:flex;flex-wrap:wrap;gap:4px">
+        ${folder ? `<span class="tag">📁 ${esc(folder)}</span>` : ''}
+        ${tags.slice(0, 2).map(t => `<span class="tag ok">#${esc(t)}</span>`).join('')}
+        ${tags.length > 2 ? `<span class="tag">+${tags.length - 2}</span>` : ''}
+      </span>
       <span class="meta">${relTime(p.updated_at)}
         &nbsp;·&nbsp;<span class="text-danger" data-action="del-prompt" data-id="${p.id}">删除</span>
       </span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 /* ================= 编辑器 ================= */
@@ -669,7 +731,81 @@ function openEditorMore() {
     <div class="list-item" data-action="editor-copy"><span>复制全文</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-export"><span>导出为 .txt</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-versions"><span>版本历史</span><span class="text-muted">${icons.chevron}</span></div>
+    <div class="list-item" data-action="editor-tags">
+      <span>标签 &amp; 文件夹</span>
+      <span class="text-muted text-xs">${editorMetaLabel()}${icons.chevron}</span>
+    </div>
+    <div class="list-item" data-action="editor-pin">
+      <span>${editorPinned() ? '取消置顶' : '置顶到素材库'}</span>
+      <span class="text-muted">${editorPinned() ? '📌' : ''}</span>
+    </div>
     <div class="action-bar mt-2"><button class="btn ghost block" data-close>关闭</button></div>`);
+}
+
+/* ---------- 标签 / 文件夹 / 置顶 ---------- */
+
+function editorPrompt() {
+  return (state.prompts || []).find(p => p.id === state.currentPromptId) || null;
+}
+function editorPinned() { return !!editorPrompt()?.pinned; }
+
+function editorMetaLabel() {
+  const p = editorPrompt();
+  if (!p) return '保存后可用';
+  const tags = parseTags(p), folder = parseFolder(p);
+  const bits = [folder && `📁${folder}`, ...tags.map(t => `#${t}`)].filter(Boolean);
+  return bits.length ? bits.slice(0, 2).join(' ') : '未设置';
+}
+
+async function saveMeta(patch) {
+  if (!state.currentPromptId) { toast('先保存一次这条提示词', 'warning'); return; }
+  try {
+    await A.updatePromptMeta(state.currentPromptId, patch);
+    await refreshPrompts();
+    toast('已更新', 'success');
+    return true;
+  } catch (e) { toast('保存失败：' + e.message, 'danger'); }
+}
+
+function openEditorTags() {
+  const p = editorPrompt();
+  if (!p) { toast('先保存一次这条提示词', 'warning'); return; }
+  const tags = parseTags(p);
+  const folders = [...new Set((state.prompts || []).map(parseFolder).filter(Boolean))].sort();
+  const folder = parseFolder(p);
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:4px">标签 &amp; 文件夹</div>
+    <div class="text-xs text-muted" style="margin-bottom:10px">标签多个用逗号分隔，方便在素材库筛选</div>
+    <div class="card" style="text-align:left">
+      <div class="text-xs text-muted">标签</div>
+      <input class="auth-input mt-2" id="metaTags" maxlength="60"
+             placeholder="文案, 广告, 小红书" value="${esc(tags.join(', '))}" />
+      <div class="text-xs text-muted mt-2">文件夹</div>
+      <input class="auth-input mt-2" id="metaFolder" maxlength="20" list="folderOpts"
+             placeholder="留空则为未归档" value="${esc(folder)}" />
+      <datalist id="folderOpts">${folders.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+      <div class="auth-msg" id="metaMsg"></div>
+    </div>
+    ${folders.length ? `<div class="chip-row" style="flex-wrap:wrap;overflow:visible">
+      ${folders.map(f => `<span class="chip" data-action="meta-folder-pick" data-val="${esc(f)}">📁 ${esc(f)}</span>`).join('')}
+    </div>` : ''}
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-action="editor-more">返回</button>
+      <button class="btn block" data-action="editor-tags-save">保存</button>
+    </div>`);
+}
+
+async function saveEditorTags() {  const raw = ($('#metaTags')?.value || '').trim();
+  const tags = [...new Set(raw.split(/[,，;；\s]+/).map(s => s.trim()).filter(Boolean))].slice(0, 6);
+  const folder = ($('#metaFolder')?.value || '').trim().slice(0, 20);
+  const okSave = await saveMeta({ tags, folder });
+  if (okSave) openEditorTags();
+}
+
+async function toggleEditorPin() {
+  if (!state.currentPromptId) { toast('先保存一次这条提示词', 'warning'); return; }
+  await saveMeta({ pinned: !editorPinned() });
+  openEditorMore();
 }
 
 async function editorVersionsSheet() {
@@ -1889,6 +2025,11 @@ document.addEventListener('click', async (e) => {
     case 'role-edit':        openRoleForm(el.dataset.role); break;
     case 'role-save':        saveRoleForm(el.dataset.role || null); break;
     case 'role-del':         removeRole(el.dataset.role); break;
+    case 'lib-filter':       libFilter = el.dataset.val; renderLibrary(); break;
+    case 'editor-tags':      openEditorTags(); break;
+    case 'editor-tags-save': saveEditorTags(); break;
+    case 'meta-folder-pick': { const i = $('#metaFolder'); if (i) i.value = el.dataset.val; break; }
+    case 'editor-pin':       toggleEditorPin(); break;
     case 'editor-more':      openEditorMore(); break;
     case 'editor-copy':      copyText(buildPreview() || ''); closeOverlay(); break;
     case 'editor-export':    exportEditorTxt(); break;

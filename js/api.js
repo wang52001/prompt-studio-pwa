@@ -60,6 +60,9 @@ export const deleteRole = (id) => api(`roles/${id}`, { method: 'DELETE' });
 export const promptVersions = (id) => api(`prompts/${id}/versions`);
 export const restorePrompt = (id, version) =>
   api(`prompts/${id}/restore`, { method: 'POST', body: { version } });
+// 只改标签 / 文件夹 / 置顶，不动版本号
+export const updatePromptMeta = (id, meta) =>
+  api(`prompts/${id}/meta`, { method: 'PUT', body: meta });
 
 /* ---------------- 乐园 ---------------- */
 export const drawGacha = () => api('playground/gacha', { method: 'POST' });

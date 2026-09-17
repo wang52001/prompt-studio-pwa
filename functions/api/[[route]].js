@@ -13,6 +13,17 @@ const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
 /* 版本历史表：首次用到时幂等创建，免去手动跑迁移脚本 */
 let _pvReady = false;
 
+/* 元信息列（标签 / 文件夹 / 置顶）：旧库用 ALTER TABLE 幂等补齐 */
+let _metaReady = false;
+async function ensurePromptMeta(env) {
+  if (_metaReady) return;
+  for (const col of ['tags TEXT', 'folder TEXT', 'pinned INTEGER DEFAULT 0']) {
+    try { await env.DB.prepare(`ALTER TABLE prompts ADD COLUMN ${col}`).run(); }
+    catch { /* 列已存在，忽略 */ }
+  }
+  _metaReady = true;
+}
+
 /* 自定义预设角色表：同样幂等创建 */
 let _rolesReady = false;
 async function ensureUserRoles(env) {
@@ -252,9 +263,12 @@ export async function onRequest(ctx) {
 
     /* ---------- 提示词 ---------- */
     if (path === 'prompts' && method === 'GET') {
+      await ensurePromptMeta(env);
       const { results } = await env.DB.prepare(
-        `SELECT id, title, system_prompt, user_prompt, variables, model, version, updated_at
-         FROM prompts WHERE user_id = ? ORDER BY updated_at DESC LIMIT 200`
+        `SELECT id, title, system_prompt, user_prompt, variables, model, version, updated_at,
+                tags, folder, pinned
+         FROM prompts WHERE user_id = ?
+         ORDER BY pinned DESC, updated_at DESC LIMIT 200`
       ).bind(user.id).all();
       return json({ prompts: results });
     }
@@ -262,13 +276,39 @@ export async function onRequest(ctx) {
     if (path === 'prompts' && method === 'POST') {
       const p = await body(request);
       if (!p.title) return err('标题不能为空');
+      await ensurePromptMeta(env);
       const r = await env.DB.prepare(
-        `INSERT INTO prompts (user_id, title, system_prompt, user_prompt, variables, model)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO prompts (user_id, title, system_prompt, user_prompt, variables, model, tags, folder, pinned)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(user.id, p.title, p.system_prompt || '', p.user_prompt || '',
-             JSON.stringify(p.variables || {}), p.model || 'qwen-turbo').run();
+             JSON.stringify(p.variables || {}), p.model || 'qwen-turbo',
+             JSON.stringify(p.tags || []), p.folder || '', p.pinned ? 1 : 0).run();
       await checkBadges(env, user.id);
       return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    /* 只改元信息（标签 / 文件夹 / 置顶），不进版本历史、不动版本号 */
+    if (path.startsWith('prompts/') && path.endsWith('/meta') && method === 'PUT') {
+      const id = path.split('/')[1];
+      const p = await body(request);
+      await ensurePromptMeta(env);
+      let tags = null, hasTags = false;
+      if (Array.isArray(p.tags)) { tags = JSON.stringify(p.tags.slice(0, 10).map(String).slice(0, 10)); hasTags = true; }
+      else if (typeof p.tags === 'string') { tags = p.tags; hasTags = true; }
+      const res = await env.DB.prepare(
+        `UPDATE prompts SET
+           tags   = CASE WHEN ? THEN ? ELSE tags END,
+           folder = CASE WHEN ? THEN ? ELSE folder END,
+           pinned = CASE WHEN ? THEN ? ELSE pinned END
+         WHERE id = ? AND user_id = ?`
+      ).bind(
+        hasTags ? 1 : 0, tags,
+        p.folder === undefined ? 0 : 1, p.folder === undefined ? null : String(p.folder).slice(0, 20),
+        p.pinned === undefined ? 0 : 1, p.pinned ? 1 : 0,
+        id, user.id
+      ).run();
+      if (!res.meta?.changes) return err('提示词不存在', 404);
+      return json({ ok: true });
     }
 
     if (path.startsWith('prompts/') && method === 'PUT') {

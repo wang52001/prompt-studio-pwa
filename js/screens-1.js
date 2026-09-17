@@ -143,7 +143,8 @@ export const screens1 = {
       <span class="text-xs text-muted" id="libCount">0 条</span>
     </div>
     <div style="padding:0 16px">
-      <div class="search-box">${icons.search}<input id="libSearch" placeholder="搜索标题 / 内容" /></div>
+      <div class="search-box">${icons.search}<input id="libSearch" placeholder="搜索标题 / 内容 / 标签" /></div>
+      <div class="chip-row" id="libFilters"></div>
     </div>
     ${scroll(`
       <div class="lib-grid" id="libGrid">
