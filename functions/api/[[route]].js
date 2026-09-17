@@ -12,6 +12,26 @@ const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
 
 /* 版本历史表：首次用到时幂等创建，免去手动跑迁移脚本 */
 let _pvReady = false;
+
+/* 自定义预设角色表：同样幂等创建 */
+let _rolesReady = false;
+async function ensureUserRoles(env) {
+  if (_rolesReady) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS user_roles (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      name       TEXT NOT NULL,
+      role_desc  TEXT,
+      system     TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`).run();
+  await env.DB.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_user_roles ON user_roles(user_id, id)'
+  ).run();
+  _rolesReady = true;
+}
+
 async function ensurePromptVersions(env) {
   if (_pvReady) return;
   await env.DB.prepare(`
@@ -287,6 +307,57 @@ export async function onRequest(ctx) {
          version=version+1, updated_at=datetime('now') WHERE id=? AND user_id=?`
       ).bind(p.title, p.system_prompt || '', p.user_prompt || '',
              JSON.stringify(p.variables || {}), p.model || 'qwen-turbo', id, user.id).run();
+      return json({ ok: true });
+    }
+
+    /* ---------- 自定义预设角色 ---------- */
+    if (path === 'roles' && method === 'GET') {
+      await ensureUserRoles(env);
+      const { results } = await env.DB.prepare(
+        'SELECT id, name, role_desc, system, created_at FROM user_roles WHERE user_id = ? ORDER BY id'
+      ).bind(user.id).all();
+      return json({ roles: results });
+    }
+
+    if (path === 'roles' && method === 'POST') {
+      const { name, role_desc, system } = await body(request);
+      const nm = String(name || '').trim();
+      const sys = String(system || '').trim();
+      if (!nm) return err('给角色起个名字');
+      if (!sys) return err('角色提示词不能为空');
+      if (nm.length > 12) return err('名字最多 12 个字');
+      if (sys.length > 2000) return err('提示词最多 2000 字');
+      await ensureUserRoles(env);
+      const cnt = await env.DB.prepare(
+        'SELECT COUNT(*) n FROM user_roles WHERE user_id = ?'
+      ).bind(user.id).first();
+      if ((cnt?.n || 0) >= 20) return err('自定义角色最多 20 个');
+      const r = await env.DB.prepare(
+        'INSERT INTO user_roles (user_id, name, role_desc, system) VALUES (?, ?, ?, ?)'
+      ).bind(user.id, nm, String(role_desc || '').trim().slice(0, 30), sys).run();
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    if (path.startsWith('roles/') && method === 'PUT') {
+      const id = Number(path.split('/')[1]) || 0;
+      const { name, role_desc, system } = await body(request);
+      const nm = String(name || '').trim();
+      const sys = String(system || '').trim();
+      if (!nm) return err('给角色起个名字');
+      if (!sys) return err('角色提示词不能为空');
+      await ensureUserRoles(env);
+      const res = await env.DB.prepare(
+        `UPDATE user_roles SET name=?, role_desc=?, system=? WHERE id=? AND user_id=?`
+      ).bind(nm, String(role_desc || '').trim().slice(0, 30), sys, id, user.id).run();
+      if (!res.meta?.changes) return err('角色不存在', 404);
+      return json({ ok: true });
+    }
+
+    if (path.startsWith('roles/') && method === 'DELETE') {
+      const id = Number(path.split('/')[1]) || 0;
+      await ensureUserRoles(env);
+      await env.DB.prepare('DELETE FROM user_roles WHERE id=? AND user_id=?')
+        .bind(id, user.id).run();
       return json({ ok: true });
     }
 

@@ -52,6 +52,11 @@ export const listPrompts = () => api('prompts');
 export const createPrompt = (p) => api('prompts', { method: 'POST', body: p });
 export const updatePrompt = (id, p) => api(`prompts/${id}`, { method: 'PUT', body: p });
 export const deletePrompt = (id) => api(`prompts/${id}`, { method: 'DELETE' });
+export const listRoles = () => api('roles');
+export const createRole = (r) => api('roles', { method: 'POST', body: r });
+export const updateRole = (id, r) => api(`roles/${id}`, { method: 'PUT', body: r });
+export const deleteRole = (id) => api(`roles/${id}`, { method: 'DELETE' });
+
 export const promptVersions = (id) => api(`prompts/${id}/versions`);
 export const restorePrompt = (id, version) =>
   api(`prompts/${id}/restore`, { method: 'POST', body: { version } });

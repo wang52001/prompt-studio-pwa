@@ -8,7 +8,8 @@ export const state = {
   bingo: [],           // 25 格 0/1
   keys: [],            // 用户自带 AI 密钥（脱敏）
   currentPromptId: null,
-  editorRole: null,    // 编辑器当前套用的预设角色 id
+  editorRole: null,    // 编辑器当前套用的预设角色 id（内置用 id，自定义用 c:数字）
+  customRoles: [],     // 用户自建的预设角色
   model: 'qwen-plus'   // 调试台当前模型
 };
 
@@ -101,8 +102,18 @@ export async function refreshKeys() {
   return state.keys;
 }
 
+export async function refreshRoles() {
+  try {
+    const r = await A.listRoles();
+    state.customRoles = r.roles || [];
+  } catch {
+    state.customRoles = [];
+  }
+  return state.customRoles;
+}
+
 export async function refreshAll() {
-  await Promise.all([refreshPrompts(), refreshStats(), loadBingo(), refreshKeys()]);
+  await Promise.all([refreshPrompts(), refreshStats(), loadBingo(), refreshKeys(), refreshRoles()]);
 }
 
 /* 当前可选模型：有默认密钥时用它所在服务商的模型，否则用内置 qwen */

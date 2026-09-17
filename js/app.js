@@ -4,7 +4,7 @@ import * as A from './api.js';
 import { icons } from './icons.js';
 import {
   state, MODELS, PROVIDERS, providerName, nfmt, kfmt, loadUser, refreshPrompts,
-  refreshStats, loadBingo, refreshKeys, refreshAll, todayCalls, totalTokens,
+  refreshStats, loadBingo, refreshKeys, refreshRoles, refreshAll, todayCalls, totalTokens,
   bingoDone, bingoLines, currentPrompt, availableModels, activeKey, usingOwnKey
 } from './store.js';
 
@@ -531,9 +531,19 @@ const EDITOR_ROLES = [
     '1. 一句话核心结论；\n2. 3-5 条要点（保留关键数字）；\n3. 值得注意的风险或争议点。\n不要添加原文没有的信息。' }
 ];
 
+/* 自定义角色的 id 统一带 c: 前缀，避免和内置 id 撞车 */
+const customRoleKey = (id) => `c:${id}`;
+function findRole(key) {
+  if (!key) return null;
+  if (String(key).startsWith('c:')) {
+    const r = (state.customRoles || []).find(x => x.id === Number(key.slice(2)));
+    return r ? { id: key, name: r.name, desc: r.role_desc || '自定义角色', system: r.system, custom: true } : null;
+  }
+  return EDITOR_ROLES.find(x => x.id === key) || null;
+}
+
 function editorRoleLabel() {
-  const r = EDITOR_ROLES.find(x => x.id === state.editorRole);
-  return r ? r.name : '未设置';
+  return findRole(state.editorRole)?.name || '未设置';
 }
 
 function syncEditorRole() {
@@ -541,31 +551,105 @@ function syncEditorRole() {
   if (el) el.textContent = editorRoleLabel();
 }
 
+const roleRow = (r) => {
+  const key = r.custom ? customRoleKey(r.id) : r.id;
+  const on = state.editorRole === key;
+  return `
+    <div class="list-item" data-action="role-apply" data-role="${key}"
+         style="${on ? 'border-color:var(--primary);' : ''}">
+      <div style="flex:1">
+        <div class="text-bold text-sm">${esc(r.name)}${on ? ' <span class="tag ok">当前</span>' : ''}</div>
+        <div class="text-xs text-muted" style="margin-top:2px">${esc(r.desc || '')}</div>
+      </div>
+      ${r.custom ? `
+        <span class="text-xs text-muted" style="padding:0 10px" data-action="role-edit" data-role="${key}">编辑</span>
+        <span class="text-xs" style="padding:0 4px;color:var(--danger)" data-action="role-del" data-role="${key}">删除</span>`
+      : `<span class="text-muted">${icons.chevron}</span>`}
+    </div>`;
+};
+
 function openRoleSheet() {
+  const mine = (state.customRoles || []).map(r => ({
+    id: r.id, name: r.name, desc: r.role_desc || '自定义角色', system: r.system, custom: true
+  }));
   overlay(`
     <div class="text-bold" style="font-size:15px;margin-bottom:4px">切换预设角色</div>
     <div class="text-xs text-muted" style="margin-bottom:10px">选一个会把 System 提示词替换成对应模板，选完还能继续改</div>
-    <div style="max-height:52vh;overflow-y:auto">
-      ${EDITOR_ROLES.map(r => `
-        <div class="list-item" data-action="role-apply" data-role="${r.id}"
-             style="${state.editorRole === r.id ? 'border-color:var(--primary);' : ''}">
-          <div style="flex:1">
-            <div class="text-bold text-sm">${r.name}${state.editorRole === r.id ? ' <span class="tag ok">当前</span>' : ''}</div>
-            <div class="text-xs text-muted" style="margin-top:2px">${r.desc}</div>
-          </div>
-          <span class="text-muted">${icons.chevron}</span>
-        </div>`).join('')}
+    <div style="max-height:50vh;overflow-y:auto">
+      <div class="text-xs text-muted" style="padding:6px 2px">内置角色</div>
+      ${EDITOR_ROLES.map(roleRow).join('')}
+      <div class="text-xs text-muted" style="padding:12px 2px 6px">我的角色</div>
+      ${mine.length ? mine.map(roleRow).join('')
+        : '<div class="text-xs text-muted" style="padding:8px 2px">还没有自定义角色，点下面「新建角色」加一个</div>'}
     </div>
-    <div class="action-bar mt-2"><button class="btn ghost block" data-close>取消</button></div>`);
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-close>取消</button>
+      <button class="btn block" data-action="role-new">新建角色</button>
+    </div>`);
 }
 
-async function applyEditorRole(id) {
-  const r = EDITOR_ROLES.find(x => x.id === id);
+function openRoleForm(key) {
+  const r = findRole(key);
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:10px">${r ? '编辑角色' : '新建角色'}</div>
+    <div class="card" style="text-align:left">
+      <input class="auth-input" id="roleName" maxlength="12" placeholder="角色名（最多 12 字）" value="${esc(r?.name || '')}" />
+      <input class="auth-input mt-2" id="roleDesc" maxlength="30" placeholder="一句话描述（选填）" value="${esc(r?.desc || '')}" />
+      <textarea class="auth-input mt-2" id="roleSystem" rows="7"
+                placeholder="这个角色的 System 提示词，可直接用 ${'${变量}'} 占位">${esc(r?.system || '')}</textarea>
+      <div class="auth-msg" id="roleMsg"></div>
+    </div>
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-action="role-pick">返回</button>
+      <button class="btn block" data-action="role-save" data-role="${r?.id || ''}">保存</button>
+    </div>`);
+}
+
+function roleMsg(text, bad = true) {
+  const el = $('#roleMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = `auth-msg${text ? (bad ? ' bad' : ' ok') : ''}`;
+}
+
+async function saveRoleForm(key) {
+  const name = ($('#roleName')?.value || '').trim();
+  const role_desc = ($('#roleDesc')?.value || '').trim();
+  const system = ($('#roleSystem')?.value || '').trim();
+  if (!name) { roleMsg('给角色起个名字'); return; }
+  if (!system) { roleMsg('角色提示词不能为空'); return; }
+  try {
+    if (key) {
+      await A.updateRole(Number(String(key).replace('c:', '')), { name, role_desc, system });
+    } else {
+      await A.createRole({ name, role_desc, system });
+    }
+    await refreshRoles();
+    openRoleSheet();
+    toast(key ? '角色已更新 ✓' : '角色已创建 ✓', 'success');
+  } catch (e) { roleMsg(e.message || '保存失败'); }
+}
+
+async function removeRole(key) {
+  const r = findRole(key);
+  if (!r) return;
+  if (!confirm(`删除自定义角色「${r.name}」？`)) return;
+  try {
+    await A.deleteRole(Number(String(key).replace('c:', '')));
+    await refreshRoles();
+    if (state.editorRole === key) { state.editorRole = null; syncEditorRole(); }
+    openRoleSheet();
+    toast('已删除', 'success');
+  } catch (e) { toast('删除失败：' + e.message, 'danger'); }
+}
+
+async function applyEditorRole(key) {
+  const r = findRole(key);
   if (!r) return;
   const cur = ($('#edSystem')?.innerText || '').trim();
   if (cur && !confirm(`用「${r.name}」模板替换现在的 System 提示词？\n（原内容会被覆盖，建议先保存）`)) return;
   if ($('#edSystem')) $('#edSystem').innerText = r.system;
-  state.editorRole = id;
+  state.editorRole = key;
   syncEditorRole();
   buildPreview();
   markEditorDirty();
@@ -1801,6 +1885,10 @@ document.addEventListener('click', async (e) => {
     case 'save-prompt': savePrompt(); break;
     case 'role-pick':        openRoleSheet(); break;
     case 'role-apply':       applyEditorRole(el.dataset.role); break;
+    case 'role-new':         openRoleForm(null); break;
+    case 'role-edit':        openRoleForm(el.dataset.role); break;
+    case 'role-save':        saveRoleForm(el.dataset.role || null); break;
+    case 'role-del':         removeRole(el.dataset.role); break;
     case 'editor-more':      openEditorMore(); break;
     case 'editor-copy':      copyText(buildPreview() || ''); closeOverlay(); break;
     case 'editor-export':    exportEditorTxt(); break;

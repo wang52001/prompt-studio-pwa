@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_versions ON prompt_versions(prompt_id, id DESC);
 
+-- 用户自定义预设角色（内置 8 个之外自己加的；线上由 ensureUserRoles 幂等创建）
+CREATE TABLE IF NOT EXISTS user_roles (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  role_desc  TEXT,
+  system     TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_roles ON user_roles(user_id, id);
+
 CREATE TABLE IF NOT EXISTS usage (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id           INTEGER NOT NULL,
