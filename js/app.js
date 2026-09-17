@@ -2398,7 +2398,7 @@ document.addEventListener('click', async (e) => {
     case 'varset-del':       removeVarSet(el.dataset.id); break;
     case 'editor-share':     openShareSheet(); break;
     case 'share-copy':       copyText(el.dataset.link || ''); break;
-    case 'share-preview':    go('share/' + el.dataset.sid); break;
+    case 'share-preview':    closeOverlay(); go('share/' + el.dataset.sid); break;
     case 'share-off':        stopShare(); break;
     case 'share-fork':       forkShared(); break;
     case 'share-home':       go(location.origin && state.user ? 'workbench' : 'login'); break;
