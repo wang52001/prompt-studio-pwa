@@ -65,16 +65,16 @@ export const screens1 = {
     ${toolbar({
       title: '<input class="title-input" id="edTitle" placeholder="给提示词起个标题" />',
       right: `<span class="text-xs text-muted" id="edSaved">未保存</span>
-              <button class="icon-btn small" data-action="toast" data-msg="更多：复制 / 导出 / 版本历史">${icons.more}</button>`
+              <button class="icon-btn small" data-action="editor-more" aria-label="更多操作">${icons.more}</button>`
     })}
     <div class="editor-tabs">
       <div class="editor-tab active" data-tab="edit">编辑</div>
       <div class="editor-tab" data-tab="debug" data-action="go" data-target="debug">调试</div>
-      <div class="editor-tab" data-tab="version" data-action="toast" data-msg="版本历史：每次保存自动留档">版本</div>
+      <div class="editor-tab" data-tab="version" data-action="editor-versions">版本</div>
     </div>
     ${scroll(`
-      <div class="list-item" data-action="toast" data-msg="切换预设角色（即将支持）">
-        <span>角色：文案写手</span><span class="text-muted">${icons.chevron}</span>
+      <div class="list-item" data-action="role-pick">
+        <span>角色：<span class="text-bold" id="edRoleName">未设置</span></span><span class="text-muted">${icons.chevron}</span>
       </div>
 
       <div class="editor-box mt-3">

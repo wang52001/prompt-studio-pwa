@@ -10,6 +10,28 @@ import { PROVIDERS, resolveEndpoint, defaultModel, providerOptions } from '../_a
 const AI_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
 
+/* 版本历史表：首次用到时幂等创建，免去手动跑迁移脚本 */
+let _pvReady = false;
+async function ensurePromptVersions(env) {
+  if (_pvReady) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS prompt_versions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      prompt_id     INTEGER NOT NULL,
+      version       INTEGER NOT NULL,
+      title         TEXT,
+      system_prompt TEXT,
+      user_prompt   TEXT,
+      variables     TEXT,
+      model         TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    )`).run();
+  await env.DB.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_prompt_versions ON prompt_versions(prompt_id, id DESC)'
+  ).run();
+  _pvReady = true;
+}
+
 /**
  * 业务错误统一用 4xx 返回。
  * 注意：Cloudflare Pages 会吞掉 Functions 返回的 5xx，替换成自带的
@@ -232,17 +254,93 @@ export async function onRequest(ctx) {
     if (path.startsWith('prompts/') && method === 'PUT') {
       const id = path.split('/')[1];
       const p = await body(request);
+
+      // 版本历史：覆盖前先把旧内容留档（表在首次用到时幂等创建）
+      await ensurePromptVersions(env);
+      const old = await env.DB.prepare(
+        'SELECT * FROM prompts WHERE id=? AND user_id=?'
+      ).bind(id, user.id).first();
+      if (old) {
+        const hasChange =
+          old.title !== p.title ||
+          (old.system_prompt || '') !== (p.system_prompt || '') ||
+          (old.user_prompt || '') !== (p.user_prompt || '') ||
+          (old.variables || '') !== JSON.stringify(p.variables || {}) ||
+          (old.model || '') !== (p.model || 'qwen-turbo');
+        if (hasChange) {
+          await env.DB.prepare(
+            `INSERT INTO prompt_versions
+               (prompt_id, version, title, system_prompt, user_prompt, variables, model)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(old.id, old.version, old.title, old.system_prompt || '', old.user_prompt || '',
+                 old.variables || '{}', old.model || 'qwen-turbo').run();
+          // 同一提示词最多留 30 个历史版本
+          await env.DB.prepare(
+            `DELETE FROM prompt_versions WHERE prompt_id = ? AND id NOT IN
+               (SELECT id FROM prompt_versions WHERE prompt_id = ? ORDER BY id DESC LIMIT 30)`
+          ).bind(old.id, old.id).run();
+        }
+      }
+
       await env.DB.prepare(
         `UPDATE prompts SET title=?, system_prompt=?, user_prompt=?, variables=?, model=?,
-         updated_at=datetime('now') WHERE id=? AND user_id=?`
+         version=version+1, updated_at=datetime('now') WHERE id=? AND user_id=?`
       ).bind(p.title, p.system_prompt || '', p.user_prompt || '',
              JSON.stringify(p.variables || {}), p.model || 'qwen-turbo', id, user.id).run();
+      return json({ ok: true });
+    }
+
+    /* 版本历史：列表 */
+    if (path.startsWith('prompts/') && path.endsWith('/versions') && method === 'GET') {
+      const id = path.split('/')[1];
+      await ensurePromptVersions(env);
+      const own = await env.DB.prepare(
+        'SELECT id FROM prompts WHERE id=? AND user_id=?'
+      ).bind(id, user.id).first();
+      if (!own) return err('提示词不存在', 404);
+      const { results } = await env.DB.prepare(
+        `SELECT id, version, title, system_prompt, user_prompt, variables, model, created_at
+         FROM prompt_versions WHERE prompt_id = ? ORDER BY id DESC LIMIT 30`
+      ).bind(id).all();
+      return json({ versions: results });
+    }
+
+    /* 版本历史：恢复（把当前内容也留档，再覆盖为所选版本） */
+    if (path.startsWith('prompts/') && path.endsWith('/restore') && method === 'POST') {
+      const id = path.split('/')[1];
+      const { version } = await body(request);
+      await ensurePromptVersions(env);
+      const own = await env.DB.prepare(
+        'SELECT id FROM prompts WHERE id=? AND user_id=?'
+      ).bind(id, user.id).first();
+      if (!own) return err('提示词不存在', 404);
+      const v = await env.DB.prepare(
+        'SELECT * FROM prompt_versions WHERE prompt_id=? AND version=? ORDER BY id DESC LIMIT 1'
+      ).bind(id, Number(version) || 0).first();
+      if (!v) return err('该版本不存在', 404);
+
+      const cur = await env.DB.prepare('SELECT * FROM prompts WHERE id=?').bind(id).first();
+      if (cur) {
+        await env.DB.prepare(
+          `INSERT INTO prompt_versions
+             (prompt_id, version, title, system_prompt, user_prompt, variables, model)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(cur.id, cur.version, cur.title, cur.system_prompt || '', cur.user_prompt || '',
+               cur.variables || '{}', cur.model || 'qwen-turbo').run();
+      }
+      await env.DB.prepare(
+        `UPDATE prompts SET title=?, system_prompt=?, user_prompt=?, variables=?, model=?,
+         version=version+1, updated_at=datetime('now') WHERE id=?`
+      ).bind(v.title, v.system_prompt || '', v.user_prompt || '', v.variables || '{}',
+             v.model || 'qwen-turbo', id).run();
       return json({ ok: true });
     }
 
     if (path.startsWith('prompts/') && method === 'DELETE') {
       const id = path.split('/')[1];
       await env.DB.prepare('DELETE FROM prompts WHERE id=? AND user_id=?').bind(id, user.id).run();
+      await ensurePromptVersions(env);
+      await env.DB.prepare('DELETE FROM prompt_versions WHERE prompt_id=?').bind(id).run();
       return json({ ok: true });
     }
 

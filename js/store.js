@@ -8,6 +8,7 @@ export const state = {
   bingo: [],           // 25 格 0/1
   keys: [],            // 用户自带 AI 密钥（脱敏）
   currentPromptId: null,
+  editorRole: null,    // 编辑器当前套用的预设角色 id
   model: 'qwen-plus'   // 调试台当前模型
 };
 

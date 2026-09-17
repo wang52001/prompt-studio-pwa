@@ -32,6 +32,20 @@ CREATE TABLE IF NOT EXISTS prompts (
 );
 CREATE INDEX IF NOT EXISTS idx_prompts_user ON prompts(user_id, updated_at DESC);
 
+-- 提示词版本历史：每次保存/恢复前快照旧内容（线上由 ensurePromptVersions 幂等创建）
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  prompt_id     INTEGER NOT NULL,
+  version       INTEGER NOT NULL,
+  title         TEXT,
+  system_prompt TEXT,
+  user_prompt   TEXT,
+  variables     TEXT,
+  model         TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_versions ON prompt_versions(prompt_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS usage (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id           INTEGER NOT NULL,

@@ -1,6 +1,7 @@
 // Prompt Studio PWA — 主逻辑：认证 / 路由 / 云端数据 / AI 真实调用
 import { screens, showTabBar, TITLES } from './screens.js';
 import * as A from './api.js';
+import { icons } from './icons.js';
 import {
   state, MODELS, PROVIDERS, providerName, nfmt, kfmt, loadUser, refreshPrompts,
   refreshStats, loadBingo, refreshKeys, refreshAll, todayCalls, totalTokens,
@@ -448,11 +449,13 @@ function buildPreview() {
 
 function loadEditorPrompt(p) {
   state.currentPromptId = p?.id ?? null;
+  state.editorRole = null;   // 打开已有/新建提示词时，角色标签重新开始
   if ($('#edTitle')) $('#edTitle').value = p?.title || '';
   if ($('#edSystem')) $('#edSystem').textContent = p?.system_prompt || '';
   if ($('#edUser')) $('#edUser').textContent = p?.user_prompt || '';
   if ($('#edVars')) $('#edVars').textContent = varsToText(p?.variables);
   if ($('#edSaved')) $('#edSaved').textContent = p ? `已保存 · ${relTime(p.updated_at)}` : '未保存';
+  syncEditorRole();
   buildPreview();
 }
 
@@ -492,6 +495,172 @@ async function deletePrompt(id) {
     toast('已删除', 'success');
     syncAll();
   } catch (e) { toast('删除失败：' + e.message, 'danger'); }
+}
+
+/* ================= 编辑器：预设角色 ================= */
+/* 选角色 = 往 System 里填一份现成的角色模板，之后随便改；
+   内容已存在时会先确认，避免辛辛苦苦写的提示词被一把覆盖。 */
+const EDITOR_ROLES = [
+  { id: 'copywriter', name: '文案写手', desc: '种草文案、卖点提炼', system:
+    '你是一位资深文案策划，擅长把产品卖点写成有画面感、能打动人的中文文案。\n' +
+    '要求：\n1. 先给 3 个不同风格的标题；\n2. 正文口语化、有节奏，避免堆砌形容词；\n' +
+    '3. 结尾给一句能直接用在海报上的 slogan。' },
+  { id: 'translator', name: '翻译官', desc: '中英互译，保留语气', system:
+    '你是一名专业中英互译。收到中文就译成英文，收到英文就译成中文。\n' +
+    '要求：只输出译文，不要解释；保留原文的语气和格式；专有名词首次出现时在括号里标注原文。' },
+  { id: 'coder', name: '代码助手', desc: '讲解、改错、重构', system:
+    '你是一位资深工程师。用户给你代码或需求，你要：\n' +
+    '1. 先用一两句话说明思路；\n2. 给出完整可运行的代码（标注语言）；\n' +
+    '3. 指出潜在坑与边界情况。默认使用用户上下文中的语言回答。' },
+  { id: 'analyst', name: '数据分析师', desc: '看数、拆因、给结论', system:
+    '你是一位严谨的数据分析师。用户提供数据或指标，你要：\n' +
+    '1. 先复述关键数字确认理解；\n2. 拆解可能的成因（按影响从大到小）；\n' +
+    '3. 给出明确结论与下一步该看的指标。不要编造数据，缺什么就问什么。' },
+  { id: 'pm', name: '产品经理', desc: '需求拆解、方案设计', system:
+    '你是一位经验丰富的产品经理。用户提出模糊需求时，你要：\n' +
+    '1. 先列出不明确的点并追问；\n2. 给出最小可行方案（MVP）；\n' +
+    '3. 说明边界情况与不做什么。输出用短段落 + 列表，别写空话。' },
+  { id: 'teacher', name: '讲解老师', desc: '把复杂讲简单', system:
+    '你是一位擅长深入浅出的老师。用生活化的类比解释概念，从「它解决什么问题」讲到「怎么用」。\n' +
+    '每次结尾给一句一句话总结，并问用户是否要更深入的例子。' },
+  { id: 'interviewer', name: '面试官', desc: '模拟问答、给点评', system:
+    '你是一位严格的面试官，一次只问一个问题。收到回答后：\n' +
+    '1. 先点评亮点与不足（各一条）；\n2. 追问一个更深的点；\n3. 满三轮后给出总体评价与建议。' },
+  { id: 'summarizer', name: '总结摘要', desc: '长文压缩、提炼要点', system:
+    '你负责把长内容压缩成易读的摘要。输出结构：\n' +
+    '1. 一句话核心结论；\n2. 3-5 条要点（保留关键数字）；\n3. 值得注意的风险或争议点。\n不要添加原文没有的信息。' }
+];
+
+function editorRoleLabel() {
+  const r = EDITOR_ROLES.find(x => x.id === state.editorRole);
+  return r ? r.name : '未设置';
+}
+
+function syncEditorRole() {
+  const el = $('#edRoleName');
+  if (el) el.textContent = editorRoleLabel();
+}
+
+function openRoleSheet() {
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:4px">切换预设角色</div>
+    <div class="text-xs text-muted" style="margin-bottom:10px">选一个会把 System 提示词替换成对应模板，选完还能继续改</div>
+    <div style="max-height:52vh;overflow-y:auto">
+      ${EDITOR_ROLES.map(r => `
+        <div class="list-item" data-action="role-apply" data-role="${r.id}"
+             style="${state.editorRole === r.id ? 'border-color:var(--primary);' : ''}">
+          <div style="flex:1">
+            <div class="text-bold text-sm">${r.name}${state.editorRole === r.id ? ' <span class="tag ok">当前</span>' : ''}</div>
+            <div class="text-xs text-muted" style="margin-top:2px">${r.desc}</div>
+          </div>
+          <span class="text-muted">${icons.chevron}</span>
+        </div>`).join('')}
+    </div>
+    <div class="action-bar mt-2"><button class="btn ghost block" data-close>取消</button></div>`);
+}
+
+async function applyEditorRole(id) {
+  const r = EDITOR_ROLES.find(x => x.id === id);
+  if (!r) return;
+  const cur = ($('#edSystem')?.innerText || '').trim();
+  if (cur && !confirm(`用「${r.name}」模板替换现在的 System 提示词？\n（原内容会被覆盖，建议先保存）`)) return;
+  if ($('#edSystem')) $('#edSystem').innerText = r.system;
+  state.editorRole = id;
+  syncEditorRole();
+  buildPreview();
+  markEditorDirty();
+  closeOverlay();
+  toast(`已切换为「${r.name}」· 记得保存`, 'success');
+}
+
+/* 内容变了但还没保存：顶部状态提示回「未保存」 */
+function markEditorDirty() {
+  if ($('#edSaved')) $('#edSaved').textContent = '未保存';
+}
+
+/* ================= 编辑器：更多菜单（复制 / 导出 / 版本历史） ================= */
+function openEditorMore() {
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:10px">${$('#edTitle')?.value?.trim() || '未命名提示词'}</div>
+    <div class="list-item" data-action="editor-copy"><span>复制全文</span><span class="text-muted">${icons.chevron}</span></div>
+    <div class="list-item" data-action="editor-export"><span>导出为 .txt</span><span class="text-muted">${icons.chevron}</span></div>
+    <div class="list-item" data-action="editor-versions"><span>版本历史</span><span class="text-muted">${icons.chevron}</span></div>
+    <div class="action-bar mt-2"><button class="btn ghost block" data-close>关闭</button></div>`);
+}
+
+async function editorVersionsSheet() {
+  if (!state.currentPromptId) { toast('先保存一次，才会有版本记录', 'warning'); return; }
+  overlay('<div class="text-muted" style="padding:20px;text-align:center">加载中…</div>');
+  try {
+    const r = await A.promptVersions(state.currentPromptId);
+    const list = r.versions || [];
+    state.__lastVersions = list;   // 供「预览某个版本」按 version 号回查
+    if (!list.length) {
+      overlay(`
+        <div class="text-bold" style="font-size:15px;margin-bottom:8px">版本历史</div>
+        <div class="empty" style="padding:24px 0">还没有历史版本<br><span class="text-xs text-muted">每次保存都会自动留档，改坏了随时能回来</span></div>
+        <div class="action-bar mt-2"><button class="btn ghost block" data-close>知道了</button></div>`);
+      return;
+    }
+    overlay(`
+      <div class="text-bold" style="font-size:15px;margin-bottom:4px">版本历史</div>
+      <div class="text-xs text-muted" style="margin-bottom:10px">点任意版本可预览，确认后恢复</div>
+      <div style="max-height:52vh;overflow-y:auto">
+        ${list.map(v => `
+          <div class="list-item" data-action="version-preview" data-version="${v.version}">
+            <div style="flex:1">
+              <div class="text-bold text-sm">v${v.version} · ${esc(v.title || '未命名')}</div>
+              <div class="text-xs text-muted" style="margin-top:2px">${esc(relTime(v.created_at))} · ${(v.system_prompt || '').length + (v.user_prompt || '').length} 字</div>
+            </div>
+            <span class="text-muted">${icons.chevron}</span>
+          </div>`).join('')}
+      </div>
+      <div class="action-bar mt-2"><button class="btn ghost block" data-close>关闭</button></div>`);
+  } catch (e) {
+    overlay(`<div class="empty">加载失败<br><span class="text-xs text-muted">${esc(e.message)}</span></div>
+             <div class="action-bar mt-2"><button class="btn ghost block" data-close>关闭</button></div>`);
+  }
+}
+
+function versionPreviewSheet(v) {
+  const fill = (s) => String(s || '').replace(/\$\{([^}]+)\}/g, (_, k) => (v.variables ? (JSON.parse(v.variables) || {})[k] ?? '' : ''));
+  const body = [fill(v.system_prompt), fill(v.user_prompt)].filter(Boolean).join('\n\n');
+  overlay(`
+    <div class="text-bold" style="font-size:15px">v${v.version} · ${esc(v.title || '未命名')}</div>
+    <div class="text-xs text-muted" style="margin:4px 0 10px">${esc(relTime(v.created_at))} · 恢复后当前内容也会自动留档</div>
+    <pre class="content" style="max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-word;
+         background:var(--surface-2);border-radius:12px;padding:12px;font-size:13px">${esc(body) || '（空）'}</pre>
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-close>取消</button>
+      <button class="btn block" data-action="version-restore" data-version="${v.version}">恢复这个版本</button>
+    </div>`);
+}
+
+async function restoreEditorVersion(version) {
+  try {
+    await A.restorePrompt(state.currentPromptId, version);
+    closeOverlay();
+    await refreshPrompts();
+    const cur = (state.prompts || []).find(x => x.id === state.currentPromptId);
+    loadEditorPrompt(cur);
+    await refreshStats();
+    toast(`已恢复到 v${version} ✓`, 'success');
+    syncAll();
+  } catch (e) { toast('恢复失败：' + e.message, 'danger'); }
+}
+
+function exportEditorTxt() {
+  const d = editorData();
+  const txt = buildPreview() || '';
+  const name = (d.title || 'prompt').replace(/[\\/:*?"<>|]/g, '_') + '.txt';
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  closeOverlay();
+  toast('已导出 ' + name, 'success');
 }
 
 async function quickSave(title, text) {
@@ -1630,6 +1799,18 @@ document.addEventListener('click', async (e) => {
 
     case 'new-prompt':  newPrompt(); break;
     case 'save-prompt': savePrompt(); break;
+    case 'role-pick':        openRoleSheet(); break;
+    case 'role-apply':       applyEditorRole(el.dataset.role); break;
+    case 'editor-more':      openEditorMore(); break;
+    case 'editor-copy':      copyText(buildPreview() || ''); closeOverlay(); break;
+    case 'editor-export':    exportEditorTxt(); break;
+    case 'editor-versions':  editorVersionsSheet(); break;
+    case 'version-preview': {
+      const v = state.__lastVersions?.find(x => x.version === Number(el.dataset.version));
+      if (v) versionPreviewSheet(v);
+      break;
+    }
+    case 'version-restore':  restoreEditorVersion(Number(el.dataset.version)); break;
     case 'del-prompt':  e.stopPropagation(); deletePrompt(Number(id)); break;
     case 'open-prompt': {
       const p = state.prompts.find(x => x.id === Number(id));
@@ -1762,7 +1943,7 @@ window.addEventListener('offline', syncNetwork);
 function bindInputs() {
   ['#edSystem', '#edUser', '#edVars'].forEach(sel => {
     const el = $(sel);
-    if (el) el.addEventListener('input', buildPreview);
+    if (el) el.addEventListener('input', () => { buildPreview(); markEditorDirty(); });
   });
   const search = $('#libSearch');
   if (search) search.addEventListener('input', renderLibrary);
