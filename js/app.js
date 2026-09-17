@@ -2152,23 +2152,28 @@ function pickImportFile() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json,.json';
+  input.style.display = 'none';
+  document.body.appendChild(input);          // 必须挂到 DOM，否则部分浏览器不弹出选择框
+  const cleanup = () => input.remove();
+
   input.onchange = async () => {
     const f = input.files?.[0];
-    if (!f) return;
+    if (!f) { cleanup(); return; }
     try {
       const raw = JSON.parse(await f.text());
       const list = Array.isArray(raw?.prompts) ? raw.prompts : Array.isArray(raw) ? raw : null;
-      if (!list) { toast('文件格式不对：需要 prompts 数组', 'danger'); return; }
-      if (!list.length) { toast('文件里没有提示词', 'warning'); return; }
-      if (!confirm(`将导入 ${list.length} 条提示词，是否继续？\n（已存在的不会受到影响）`)) return;
+      if (!list) { toast('文件格式不对：需要 prompts 数组', 'danger'); cleanup(); return; }
+      if (!list.length) { toast('文件里没有提示词', 'warning'); cleanup(); return; }
+      if (!confirm(`将导入 ${list.length} 条提示词，是否继续？\n（已存在的不会受到影响）`)) { cleanup(); return; }
       const r = await A.importPrompts(list);
       await refreshPrompts();
       toast(`已导入 ${r.imported} 条 ✓`, 'success');
       renderLibrary();
     } catch (e) {
       toast(/JSON|Unexpected/.test(e.message) ? '文件不是合法 JSON' : '导入失败：' + e.message, 'danger');
-    }
+    } finally { cleanup(); }
   };
+  input.addEventListener('cancel', cleanup);  // 用户点了「取消」也要清掉隐藏 input
   input.click();
 }
 
