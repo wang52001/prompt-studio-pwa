@@ -84,6 +84,11 @@ function apply(path) {
   if (id === 'credits') loadCredits();
   if (id === 'settings') loadSettings();
 
+  // 依赖云端数据的列表页，每次进入都要按最新数据重绘
+  // （否则改完标签 / 保存提示词后返回，看到的还是旧内容）
+  if (id === 'library') renderLibrary();
+  if (id === 'workbench') renderRecent();
+
   // 评测模块：子路径交给 PromptOps 自己解析（#/ops/run/8 → sub = run/8）
   if (id === 'ops') window.OpsModule?.route(sub);
 
