@@ -1,7 +1,7 @@
 // 后端统一入口：Cloudflare Pages Functions catch-all
 import {
   json, err, hashPassword, randomToken, currentUser, createSession,
-  isEmail, logUsage, readStreamUsage, sessionCookie, clearCookie,
+  isEmail, logUsage, readStreamUsage, readStreamBody, sessionCookie, clearCookie,
   encryptSecret, decryptSecret, maskKey
 } from '../_lib.js';
 import { sendLoginCode, randomCode, sha256 } from '../_mail.js';
@@ -12,6 +12,29 @@ const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
 
 /* 版本历史表：首次用到时幂等创建，免去手动跑迁移脚本 */
 let _pvReady = false;
+
+/* 对话记录表：同样幂等创建 */
+let _histReady = false;
+async function ensureChatHistory(env) {
+  if (_histReady) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS chat_history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      prompt_id  INTEGER,
+      title      TEXT,
+      model      TEXT,
+      messages   TEXT NOT NULL,
+      answer     TEXT,
+      p_tokens   INTEGER DEFAULT 0,
+      c_tokens   INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`).run();
+  await env.DB.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_chat_history ON chat_history(user_id, id)'
+  ).run();
+  _histReady = true;
+}
 
 /* 元信息列（标签 / 文件夹 / 置顶）：旧库用 ALTER TABLE 幂等补齐 */
 let _metaReady = false;
@@ -562,9 +585,77 @@ export async function onRequest(ctx) {
       return json({ ok: true });
     }
 
-    /* ---------- AI 对话 / 调试 ---------- */
+/* ---------- 对话记录：把一次调用的输入输出存档（失败不影响主流程） ---------- */
+const HIST_MSG_MAX = 24000;    // messages JSON 上限
+const HIST_ANS_MAX = 12000;    // 单条回答上限
+
+async function saveHistory(env, userId, promptId, messages, model, answer, usage) {
+  try {
+    let msgs = messages;
+    let packed = JSON.stringify(msgs);
+    // 超长对话只留首条上下文 + 最后一条提问，避免把数据库撑爆
+    if (packed.length > HIST_MSG_MAX) {
+      const keep = msgs.length > 2 ? [msgs[0], msgs[msgs.length - 1]] : msgs;
+      packed = JSON.stringify(keep);
+    }
+    if (packed.length > HIST_MSG_MAX) packed = packed.slice(0, HIST_MSG_MAX);
+
+    const ans = String(answer || '').slice(0, HIST_ANS_MAX);
+    const lastUser = [...msgs].reverse().find(m => m.role === 'user')?.content || '';
+    const title = String(lastUser).replace(/\s+/g, ' ').trim().slice(0, 30);
+
+    await ensureChatHistory(env);
+    await env.DB.prepare(
+      `INSERT INTO chat_history (user_id, prompt_id, title, model, messages, answer, p_tokens, c_tokens)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(userId, Number(promptId) || null, title, model || '',
+           packed, ans, Number(usage?.prompt_tokens) || 0, Number(usage?.completion_tokens) || 0).run();
+
+    // 每人最多留 200 条，超出的从最早开始清
+    await env.DB.prepare(
+      `DELETE FROM chat_history WHERE user_id = ? AND id NOT IN
+         (SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 200)`
+    ).bind(userId, userId).run();
+  } catch { /* 存档失败不影响对话本身 */ }
+}
+
+/* ---------- AI 对话 / 调试 ---------- */
+    /* ---------- 对话记录（每次真实调用都落库，方便回看 / 复用输出） ---------- */
+    if (path === 'chat-history' && method === 'GET') {
+      await ensureChatHistory(env);
+      const pid = Number(new URL(request.url).searchParams.get('prompt_id')) || 0;
+      const where = pid ? 'AND prompt_id = ?' : '';
+      const args = pid ? [user.id, pid] : [user.id];
+      const { results } = await env.DB.prepare(
+        `SELECT id, prompt_id, model, answer, p_tokens, c_tokens, created_at
+         FROM chat_history WHERE user_id = ? ${where}
+         ORDER BY id DESC LIMIT 50`
+      ).bind(...args).all();
+      return json({ items: results });
+    }
+
+    if (path.startsWith('chat-history/') && method === 'GET') {
+      await ensureChatHistory(env);
+      const id = Number(path.split('/')[1]) || 0;
+      const row = await env.DB.prepare(
+        'SELECT id, prompt_id, model, messages, answer, p_tokens, c_tokens, created_at FROM chat_history WHERE id = ? AND user_id = ?'
+      ).bind(id, user.id).first();
+      if (!row) return err('记录不存在', 404);
+      let messages = [];
+      try { messages = JSON.parse(row.messages || '[]'); } catch { messages = []; }
+      return json({ item: { ...row, messages } });
+    }
+
+    if (path.startsWith('chat-history/') && method === 'DELETE') {
+      await ensureChatHistory(env);
+      const id = Number(path.split('/')[1]) || 0;
+      await env.DB.prepare('DELETE FROM chat_history WHERE id = ? AND user_id = ?')
+        .bind(id, user.id).run();
+      return json({ ok: true });
+    }
+
     if (path === 'chat' && method === 'POST') {
-      const { messages, model, temperature = 0.7, stream = true } = await body(request);
+      const { messages, model, temperature = 0.7, stream = true, prompt_id = null } = await body(request);
       if (!Array.isArray(messages) || !messages.length) return err('messages 不能为空');
 
       // 优先用用户自己的密钥，没有才回退到服务端内置密钥
@@ -614,9 +705,12 @@ export async function onRequest(ctx) {
       }
 
       if (stream) {
-        // 分流：一路直接返回前端，一路后台统计 token
+        // 分流：一路直接返回前端，一路后台统计 token 并落库存档
         const [toClient, toMeter] = upstream.body.tee();
-        ctx.waitUntil(readStreamUsage(toMeter).then(u => logUsage(env, user.id, useModel, u)));
+        ctx.waitUntil(readStreamBody(toMeter).then(async ({ usage, content }) => {
+          await logUsage(env, user.id, useModel, usage);
+          await saveHistory(env, user.id, prompt_id, messages, useModel, content, usage);
+        }));
         return new Response(toClient, {
           headers: {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -629,6 +723,8 @@ export async function onRequest(ctx) {
 
       const data = await upstream.json();
       await logUsage(env, user.id, useModel, data.usage);
+      await saveHistory(env, user.id, prompt_id, messages, useModel,
+        data.choices?.[0]?.message?.content || '', data.usage);
       return json(data);
     }
 

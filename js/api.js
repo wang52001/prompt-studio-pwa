@@ -126,6 +126,12 @@ export const setDefault = (id) => api('keys/default', { method: 'POST', body: { 
 export const updateKey  = (id, p) => api(`keys/${id}`, { method: 'PUT', body: p });
 export const deleteKey  = (id) => api(`keys/${id}`, { method: 'DELETE' });
 
+/* ---------------- 对话记录 ---------------- */
+export const chatHistory = (promptId = 0) =>
+  api(`chat-history${promptId ? `?prompt_id=${promptId}` : ''}`);
+export const chatHistoryItem = (id) => api(`chat-history/${id}`);
+export const deleteChatHistory = (id) => api(`chat-history/${id}`, { method: 'DELETE' });
+
 /* ---------------- AI 一次性对话（非流式） ---------------- */
 export const chatOnce = (messages, model = 'qwen-plus', temperature = 0.2) =>
   api('chat', { method: 'POST', body: { messages, model, temperature, stream: false } });
@@ -136,12 +142,12 @@ export const chatOnce = (messages, model = 'qwen-plus', temperature = 0.2) =>
  * @param {Object} opts     { model, temperature, onDelta, signal }
  * @returns {Promise<void>}
  */
-export async function chatStream(messages, { model = 'qwen-turbo', temperature = 0.7, onDelta, signal } = {}) {
+export async function chatStream(messages, { model = 'qwen-turbo', temperature = 0.7, promptId = null, onDelta, signal } = {}) {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, model, temperature, stream: true }),
+    body: JSON.stringify({ messages, model, temperature, stream: true, prompt_id: promptId }),
     signal
   });
 

@@ -119,10 +119,12 @@ export async function logUsage(env, userId, model, usage, status = 'ok') {
 }
 
 /** 读取 SSE 流，抓取最后的 usage 字段 */
-export async function readStreamUsage(stream) {
+/* 流式响应：一次遍历同时拿到 usage 和完整正文（用于 token 统计 + 对话落库） */
+export async function readStreamBody(stream) {
   const reader = stream.getReader();
   const dec = new TextDecoder();
   let usage = null;
+  const parts = [];
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -134,9 +136,15 @@ export async function readStreamUsage(stream) {
         try {
           const j = JSON.parse(raw);
           if (j.usage) usage = j.usage;
+          const delta = j.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta) parts.push(delta);
         } catch { /* 忽略非 JSON 行 */ }
       }
     }
   } catch { /* 忽略解析异常 */ }
-  return usage;
+  return { usage, content: parts.join('') };
+}
+
+export async function readStreamUsage(stream) {
+  return (await readStreamBody(stream)).usage;
 }

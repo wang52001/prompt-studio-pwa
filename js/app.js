@@ -736,6 +736,7 @@ function openEditorMore() {
     <div class="list-item" data-action="editor-copy"><span>复制全文</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-export"><span>导出为 .txt</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-versions"><span>版本历史</span><span class="text-muted">${icons.chevron}</span></div>
+    <div class="list-item" data-action="editor-history"><span>运行记录</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-tags">
       <span>标签 &amp; 文件夹</span>
       <span class="text-muted text-xs">${editorMetaLabel()}${icons.chevron}</span>
@@ -811,6 +812,91 @@ async function toggleEditorPin() {
   if (!state.currentPromptId) { toast('先保存一次这条提示词', 'warning'); return; }
   await saveMeta({ pinned: !editorPinned() });
   openEditorMore();
+}
+
+/* ---------- 运行记录（每次 AI 调用的输入输出） ---------- */
+
+async function editorHistorySheet() {
+  overlay('<div class="text-muted" style="padding:20px;text-align:center">加载中…</div>');
+  let items = [];
+  try {
+    const r = await A.chatHistory(state.currentPromptId || 0);
+    items = r.items || [];
+  } catch (e) { overlay(`<div class="text-sm" style="padding:20px">加载失败：${esc(e.message)}</div>`); return; }
+
+  state.__lastHistory = items;
+  const totalTok = (i) => (Number(i.p_tokens) || 0) + (Number(i.c_tokens) || 0);
+
+  if (!items.length) {
+    overlay(`
+      <div class="text-bold" style="font-size:15px;margin-bottom:8px">运行记录</div>
+      <div class="empty" style="padding:24px 0">还没有运行记录<br>
+        <span class="text-xs text-muted">在调试台跑一次，输入输出会自动存到这里</span></div>
+      <div class="action-bar mt-2"><button class="btn ghost block" data-close>知道了</button></div>`);
+    return;
+  }
+
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:4px">运行记录</div>
+    <div class="text-xs text-muted" style="margin-bottom:10px">最近 ${items.length} 条${state.currentPromptId ? '（当前提示词）' : ''}，点一条看完整内容</div>
+    <div style="max-height:55vh;overflow-y:auto">
+      ${items.map(i => `
+        <div class="list-item" data-action="hist-open" data-id="${i.id}">
+          <div style="flex:1">
+            <div class="text-sm text-bold">${esc(i.title || '（无提问）')}</div>
+            <div class="text-xs text-muted" style="margin-top:2px;line-height:1.5">
+              ${esc(String(i.answer || '').replace(/\s+/g, ' ').slice(0, 40)) || '（空输出）'}…
+            </div>
+            <div class="text-xs text-muted" style="margin-top:4px">
+              ${esc(i.model || '')} · ${esc(relTime(i.created_at))} · ${totalTok(i)} tok
+            </div>
+          </div>
+          <span class="text-muted">${icons.chevron}</span>
+        </div>`).join('')}
+    </div>
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-action="editor-more">返回</button>
+      <button class="btn ghost block" data-close>关闭</button>
+    </div>`);
+}
+
+async function historyItemSheet(id) {
+  overlay('<div class="text-muted" style="padding:20px;text-align:center">加载中…</div>');
+  let item;
+  try { item = (await A.chatHistoryItem(id)).item; }
+  catch (e) { overlay(`<div class="text-sm" style="padding:20px">加载失败：${esc(e.message)}</div>`); return; }
+  if (!item) { toast('记录不存在', 'warning'); editorHistorySheet(); return; }
+
+  state.__curHistory = item;
+  const ask = [...(item.messages || [])].reverse().find(m => m.role === 'user')?.content || '';
+
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:6px">${esc(item.title || '运行记录')}</div>
+    <div class="text-xs text-muted" style="margin-bottom:10px">
+      ${esc(item.model || '')} · ${esc(relTime(item.created_at))} ·
+      提示 ${item.p_tokens || 0} / 完成 ${item.c_tokens || 0} tok</div>
+    <div style="max-height:50vh;overflow-y:auto;text-align:left">
+      ${ask ? `<div class="text-xs text-muted">提问</div>
+        <div class="card mt-2" style="white-space:pre-wrap;font-size:12px;line-height:1.6">${esc(ask)}</div>` : ''}
+      <div class="text-xs text-muted mt-3">输出</div>
+      <div class="card mt-2" id="histAnswer" style="white-space:pre-wrap;font-size:12px;line-height:1.6;max-height:34vh;overflow-y:auto">${esc(item.answer || '（空）')}</div>
+    </div>
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-action="hist-copy">复制输出</button>
+      <button class="btn ghost block" data-action="hist-rerun">用提问重填</button>
+      <button class="btn ghost block" data-action="hist-del" data-id="${item.id}"
+              style="color:var(--danger)">删除</button>
+    </div>
+    <div class="action-bar"><button class="btn ghost block" data-action="editor-history">返回列表</button></div>`);
+}
+
+async function removeHistoryItem(id) {
+  if (!confirm('删除这条运行记录？')) return;
+  try {
+    await A.deleteChatHistory(id);
+    toast('已删除', 'success');
+    editorHistorySheet();
+  } catch (e) { toast('删除失败：' + e.message, 'danger'); }
 }
 
 async function editorVersionsSheet() {
@@ -1082,6 +1168,7 @@ async function sendMessage() {
     await A.chatStream(messages, {
       model: state.model,
       temperature: 0.7,
+      promptId: state.currentPromptId || null,
       onDelta: (d) => {
         acc += d;
         if (ai) ai.innerHTML = md(acc);
@@ -2035,6 +2122,17 @@ document.addEventListener('click', async (e) => {
     case 'editor-tags-save': saveEditorTags(); break;
     case 'meta-folder-pick': { const i = $('#metaFolder'); if (i) i.value = el.dataset.val; break; }
     case 'editor-pin':       toggleEditorPin(); break;
+    case 'editor-history':   editorHistorySheet(); break;
+    case 'hist-open':        historyItemSheet(el.dataset.id); break;
+    case 'hist-copy':        copyText($('#histAnswer')?.textContent || ''); break;
+    case 'hist-rerun': {
+      const ask = [...(state.__curHistory?.messages || [])].reverse().find(m => m.role === 'user')?.content || '';
+      if ($('#edUser')) $('#edUser').textContent = ask;
+      markEditorDirty(); buildPreview(); closeOverlay();
+      toast('已回填到 User 区，可直接再跑一次', 'success');
+      break;
+    }
+    case 'hist-del':         removeHistoryItem(el.dataset.id); break;
     case 'editor-more':      openEditorMore(); break;
     case 'editor-copy':      copyText(buildPreview() || ''); closeOverlay(); break;
     case 'editor-export':    exportEditorTxt(); break;

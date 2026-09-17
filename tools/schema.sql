@@ -276,3 +276,18 @@ CREATE TABLE IF NOT EXISTS user_settings (
   notify        INTEGER DEFAULT 1,
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 对话记录（每次 AI 调用的输入输出存档，用于回看与复用）
+CREATE TABLE IF NOT EXISTS chat_history (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  prompt_id  INTEGER,            -- 关联的提示词，调试台自由对话时为 NULL
+  title      TEXT,               -- 从最后一条 user 消息截取，列表预览用
+  model      TEXT,
+  messages   TEXT NOT NULL,      -- JSON 数组
+  answer     TEXT,               -- 模型最终输出
+  p_tokens   INTEGER DEFAULT 0,
+  c_tokens   INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_history ON chat_history(user_id, id);
