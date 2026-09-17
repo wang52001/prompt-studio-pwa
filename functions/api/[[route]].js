@@ -378,11 +378,25 @@ export async function onRequest(ctx) {
         return err('还没有可用的 AI 密钥：去「我的 → API 密钥管理」添加你自己的，或让管理员配置服务端密钥', 400);
       }
 
-      const upstream = await fetch(endpoint, {
+      /* OpenAI 兼容接口在流式模式下默认不回传 usage，必须显式声明
+         stream_options.include_usage，否则「累计 Token」永远是 0。 */
+      const mkPayload = (withUsage) => {
+        const p = { model: useModel, messages, temperature, stream };
+        if (withUsage) p.stream_options = { include_usage: true };
+        return p;
+      };
+      const callUpstream = (payload) => fetch(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: useModel, messages, temperature, stream })
+        body: JSON.stringify(payload)
       });
+
+      let upstream = await callUpstream(mkPayload(stream));
+      // 少数上游不认识 stream_options 会返回 400，退一档重发，别把正常调用打挂
+      if (stream && !upstream.ok && upstream.status === 400) {
+        await upstream.text().catch(() => {});
+        upstream = await callUpstream(mkPayload(false));
+      }
 
       if (!upstream.ok) {
         const text = await upstream.text();
