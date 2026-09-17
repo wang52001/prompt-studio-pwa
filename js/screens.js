@@ -38,7 +38,8 @@ export const TITLES = {
   stats: '统计分析',
   batchtest: '批量测试',
   credits: '灵感值流水',
-  offline: '离线状态'
+  offline: '离线状态',
+  share: '共享提示词'
 };
 
 export default screens;

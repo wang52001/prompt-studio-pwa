@@ -64,7 +64,8 @@ async function ensureVarSets(env) {
 let _metaReady = false;
 async function ensurePromptMeta(env) {
   if (_metaReady) return;
-  for (const col of ['tags TEXT', 'folder TEXT', 'pinned INTEGER DEFAULT 0']) {
+  for (const col of ['tags TEXT', 'folder TEXT', 'pinned INTEGER DEFAULT 0',
+                     'share_id TEXT']) {
     try { await env.DB.prepare(`ALTER TABLE prompts ADD COLUMN ${col}`).run(); }
     catch { /* 列已存在，忽略 */ }
   }
@@ -284,6 +285,32 @@ export async function onRequest(ctx) {
       }, 200, { 'Set-Cookie': sessionCookie(token) });
     }
 
+    /* ---------- 公开分享：免登录读取（放在登录校验之前） ----------
+       只外发提示词内容本身，不返回作者邮箱 / id 等任何账号信息。 */
+    if (path.startsWith('share/') && method === 'GET') {
+      const sid = String(path.slice(6)).trim();
+      if (!sid) return err('缺少分享码', 404);
+      await ensurePromptMeta(env);
+      const p = await env.DB.prepare(
+        `SELECT title, system_prompt, user_prompt, variables, model, tags, folder, updated_at
+         FROM prompts WHERE share_id = ?`
+      ).bind(sid).first();
+      if (!p) return err('链接已失效或不存在', 404);
+      return json({
+        ok: true,
+        item: {
+          title: p.title,
+          system_prompt: p.system_prompt || '',
+          user_prompt: p.user_prompt || '',
+          variables: safeJson(p.variables, {}),
+          model: p.model || 'qwen-turbo',
+          tags: safeJson(p.tags, []),
+          folder: p.folder || '',
+          updated_at: p.updated_at
+        }
+      });
+    }
+
     /* ---------- 以下需要登录 ---------- */
     const user = await currentUser(request, env);
     if (!user) return err('请先登录', 401);
@@ -379,6 +406,68 @@ export async function onRequest(ctx) {
       await env.DB.prepare('DELETE FROM prompt_varsets WHERE id = ? AND user_id = ?')
         .bind(sid, user.id).run();
       return json({ ok: true });
+    }
+
+    /* ---------- 分享链接：开 / 关 ---------- */
+    if (path.startsWith('prompts/') && path.endsWith('/share') && method === 'POST') {
+      const id = path.split('/')[1];
+      await ensurePromptMeta(env);
+      const row = await env.DB.prepare(
+        'SELECT share_id FROM prompts WHERE id = ? AND user_id = ?'
+      ).bind(id, user.id).first();
+      if (!row) return err('提示词不存在', 404);
+      if (row.share_id) return json({ ok: true, share_id: row.share_id });   // 已开启则复用
+      const sid = randomToken(10);
+      await env.DB.prepare('UPDATE prompts SET share_id = ? WHERE id = ? AND user_id = ?')
+        .bind(sid, id, user.id).run();
+      return json({ ok: true, share_id: sid });
+    }
+
+    if (path.startsWith('prompts/') && path.endsWith('/share') && method === 'DELETE') {
+      const id = path.split('/')[1];
+      await ensurePromptMeta(env);
+      await env.DB.prepare('UPDATE prompts SET share_id = NULL WHERE id = ? AND user_id = ?')
+        .bind(id, user.id).run();
+      return json({ ok: true });
+    }
+
+    /* ---------- 批量导入 ---------- */
+    if (path === 'import' && method === 'POST') {
+      const payload = await body(request);
+      const list = Array.isArray(payload?.prompts) ? payload.prompts
+                 : Array.isArray(payload) ? payload : null;
+      if (!list) return err('文件格式不对：需要包含 prompts 数组');
+      if (!list.length) return err('没有可导入的提示词');
+      if (list.length > 200) return err('一次最多导入 200 条');
+
+      await ensurePromptMeta(env);
+      const asTags = (v) => {
+        const arr = Array.isArray(v) ? v : safeJson(v, []);
+        return (Array.isArray(arr) ? arr : []).filter(Boolean).slice(0, 10);
+      };
+      const asVars = (v) => (v && typeof v === 'object') ? v : safeJson(v, {});
+
+      let n = 0;
+      for (const it of list) {
+        const title = String(it?.title || '').trim();
+        if (!title) continue;                     // 没标题的跳过，不占 ID
+        await env.DB.prepare(
+          `INSERT INTO prompts (user_id, title, system_prompt, user_prompt, variables, model, tags, folder, pinned)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          user.id, title.slice(0, 60),
+          String(it?.system_prompt || '').slice(0, 8000),
+          String(it?.user_prompt || '').slice(0, 8000),
+          JSON.stringify(asVars(it?.variables)),
+          String(it?.model || 'qwen-turbo'),
+          JSON.stringify(asTags(it?.tags)),
+          String(it?.folder || '').slice(0, 20),
+          it?.pinned ? 1 : 0
+        ).run();
+        n++;
+      }
+      await checkBadges(env, user.id);
+      return json({ ok: true, imported: n });
     }
 
     /* 只改元信息（标签 / 文件夹 / 置顶），不进版本历史、不动版本号 */
@@ -1274,8 +1363,9 @@ async function saveHistory(env, userId, promptId, messages, model, answer, usage
 
     /* ---------- 数据导出 ---------- */
     if (path === 'export' && method === 'GET') {
+      await ensurePromptMeta(env);
       const [prompts, usage, gacha, silly, fails, comm, badges] = await Promise.all([
-        env.DB.prepare('SELECT title, system_prompt, user_prompt, variables, model, created_at FROM prompts WHERE user_id = ?').bind(user.id).all(),
+        env.DB.prepare('SELECT title, system_prompt, user_prompt, variables, model, tags, folder, pinned, created_at FROM prompts WHERE user_id = ?').bind(user.id).all(),
         env.DB.prepare('SELECT model, prompt_tokens, completion_tokens, created_at FROM usage WHERE user_id = ? ORDER BY id DESC LIMIT 500').bind(user.id).all(),
         env.DB.prepare('SELECT rarity, prize, created_at FROM gacha_log WHERE user_id = ?').bind(user.id).all(),
         env.DB.prepare('SELECT body, likes, created_at FROM silly_posts WHERE user_id = ?').bind(user.id).all(),

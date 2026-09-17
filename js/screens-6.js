@@ -22,5 +22,25 @@ export const screens6 = {
         <div class="empty">正在加载评测台…</div>
       </div>
       <div id="opsToast" class="ops-toast" hidden></div>
-    </div>`))
+    </div>`)),
+
+  // 公开分享页（免登录只读）
+  share: () => shell('share', '', `
+    <div class="toolbar">
+      <span style="width:20px"></span>
+      <div class="toolbar-title">共享提示词</div>
+      <span style="width:20px"></span>
+    </div>
+    ${scroll(`
+      <div id="shareBody">
+        <div class="text-xs text-muted" style="padding:24px 2px;text-align:center">加载中…</div>
+      </div>
+      <div class="action-bar">
+        <button class="btn block" data-action="share-fork">复制到我的素材库</button>
+        <button class="btn ghost block" data-action="share-home">去工作台</button>
+      </div>
+      <div class="text-xs text-muted mt-3" style="line-height:1.7">
+        这是别人分享的只读提示词，复制一份到自己的素材库后就能编辑。
+      </div>
+    `)}`)
 };

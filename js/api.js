@@ -114,6 +114,11 @@ export const getSettings = () => api('settings');
 export const saveSettings = (s) => api('settings', { method: 'PUT', body: s });
 export const getCredits  = () => api('credits');
 export const exportData  = () => api('export');
+export const importPrompts = (prompts) => api('import', { method: 'POST', body: { prompts } });
+export const sharePrompt = (id) => api(`prompts/${id}/share`, { method: 'POST' });
+export const unsharePrompt = (id) => api(`prompts/${id}/share`, { method: 'DELETE' });
+// 公开读取，不需要登录
+export const getShared = (sid) => api(`share/${sid}`);
 
 /* ---------------- 统计 ---------------- */
 export const getStats = () => api('stats');

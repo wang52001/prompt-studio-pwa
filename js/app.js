@@ -51,8 +51,11 @@ function apply(path) {
   let [id, sub] = splitPath(path);
   if (!screens[id]) { id = 'workbench'; sub = ''; }
 
+  // 公开分享页例外：未登录也要能看（内容由公共接口给出，不含作者信息）
+  const open = ['login', 'share'];
+
   // 未登录：除登录页外一律拦截
-  if (!state.user && id !== 'login') { go('login'); return; }
+  if (!state.user && id !== 'login' && !open.includes(id)) { go('login'); return; }
   // 已登录：不该停在登录页
   if (state.user && id === 'login') { go('workbench'); return; }
 
@@ -83,6 +86,7 @@ function apply(path) {
   if (id === 'community') loadCommunity();
   if (id === 'credits') loadCredits();
   if (id === 'settings') loadSettings();
+  if (id === 'share') renderShared(splitPath(path)[1]);
 
   // 依赖云端数据的列表页，每次进入都要按最新数据重绘
   // （否则改完标签 / 保存提示词后返回，看到的还是旧内容）
@@ -605,6 +609,107 @@ function applyVarSet(name) {
   toast(`已套用「${name}」`, 'success');
 }
 
+/* ---------- 分享链接 ---------- */
+
+async function openShareSheet() {
+  if (!state.currentPromptId) { toast('先保存一次这条提示词', 'warning'); return; }
+  overlay('<div class="text-muted" style="padding:20px;text-align:center">加载中…</div>');
+  const sid = await A.sharePrompt(state.currentPromptId)
+    .then(r => r.share_id).catch(e => { toast('生成失败：' + e.message, 'danger'); return null; });
+  if (!sid) { openEditorMore(); return; }
+  const link = `${location.origin}${location.pathname}#/share/${sid}`;
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:6px">分享这条提示词</div>
+    <div class="text-xs text-muted" style="margin-bottom:10px">
+      任何人在浏览器打开都能看到内容，但看得到你的账号信息；随时可以关掉</div>
+    <div class="card" style="text-align:left">
+      <div class="text-xs text-muted">公开链接</div>
+      <div class="text-sm mt-2" id="shareLink" style="word-break:break-all;line-height:1.6">${esc(link)}</div>
+    </div>
+    <div class="action-bar mt-2">
+      <button class="btn block" data-action="share-copy" data-link="${esc(link)}">复制链接</button>
+      <button class="btn ghost block" data-action="share-preview" data-sid="${esc(sid)}">预览</button>
+    </div>
+    <div class="action-bar">
+      <button class="btn ghost block" data-action="share-off" style="color:var(--danger)">停止分享</button>
+    </div>
+    <div class="action-bar"><button class="btn ghost block" data-action="editor-more">返回</button></div>`);
+}
+
+/* ---------- 公开分享页（免登录只读） ---------- */
+
+async function renderShared(sid) {
+  const box = $('#shareBody');
+  if (!box) return;
+  box.innerHTML = '<div class="text-xs text-muted" style="padding:24px 2px;text-align:center">加载中…</div>';
+  let item = null;
+  try {
+    item = (await A.getShared(String(sid || '').trim())).item;
+  } catch (e) {
+    box.innerHTML = `<div class="empty" style="padding:32px 12px;text-align:center">
+      <div class="text-sm text-bold">打不开这个分享</div>
+      <div class="text-xs text-muted mt-2">${esc(e.message || '链接可能已失效')}</div></div>`;
+    state.__shared = null;
+    return;
+  }
+  state.__shared = item;
+
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  const vars = item.variables && typeof item.variables === 'object' ? item.variables : {};
+  const varRows = Object.entries(vars);
+  const meta = [item.folder && `📁 ${item.folder}`, ...tags.map(t => `#${t}`)].filter(Boolean);
+
+  box.innerHTML = `
+    <div class="text-bold" style="font-size:17px;line-height:1.4">${esc(item.title)}</div>
+    ${meta.length ? `<div class="mt-2">${meta.map(m => `<span class="tag ok" style="margin-right:6px">${esc(m)}</span>`).join('')}</div>` : ''}
+    <div class="text-xs text-muted mt-2">模型 ${esc(item.model || '')}${item.updated_at ? ' · 更新于 ' + esc(item.updated_at) : ''}</div>
+
+    ${item.system_prompt ? `
+      <div class="text-xs text-muted mt-3">System</div>
+      <div class="card mt-2" style="white-space:pre-wrap;font-size:12px;line-height:1.7">${esc(item.system_prompt)}</div>` : ''}
+
+    ${item.user_prompt ? `
+      <div class="text-xs text-muted mt-3">User</div>
+      <div class="card mt-2" style="white-space:pre-wrap;font-size:12px;line-height:1.7">${esc(item.user_prompt)}</div>` : ''}
+
+    ${varRows.length ? `
+      <div class="text-xs text-muted mt-3">变量</div>
+      <div class="card mt-2" style="font-size:12px;line-height:1.8">
+        ${varRows.map(([k, v]) => `<div><span class="chip" style="margin-right:8px">${esc(k)}</span>${esc(v)}</div>`).join('')}
+      </div>` : ''}`;
+}
+
+async function forkShared() {
+  const s = state.__shared;
+  if (!s) { toast('内容还没加载好', 'warning'); return; }
+  if (!state.user) { toast('登录后才能复制到自己的素材库', 'warning'); go('login'); return; }
+  try {
+    await A.createPrompt({
+      title: `${s.title}（副本）`.slice(0, 60),
+      system_prompt: s.system_prompt || '',
+      user_prompt: s.user_prompt || '',
+      variables: s.variables || {},
+      model: s.model || 'qwen-turbo',
+      tags: Array.isArray(s.tags) ? s.tags : [],
+      folder: s.folder || '',
+      pinned: 0
+    });
+    await refreshPrompts();
+    toast('已复制到素材库 ✓', 'success');
+    go('library');
+  } catch (e) { toast('复制失败：' + e.message, 'danger'); }
+}
+
+async function stopShare() {
+  if (!state.currentPromptId) return;
+  if (!confirm('停止分享后，之前发出的链接会立即失效。继续？')) return;
+  try {
+    await A.unsharePrompt(state.currentPromptId);
+    toast('已停止分享', 'success');
+    openEditorMore();
+  } catch (e) { toast('操作失败：' + e.message, 'danger'); }
+}
+
 async function removeVarSet(id) {
   if (!confirm('删除这个取值方案？')) return;
   try {
@@ -864,6 +969,7 @@ function openEditorMore() {
     <div class="list-item" data-action="editor-copy"><span>复制全文</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-export"><span>导出为 .txt</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-versions"><span>版本历史</span><span class="text-muted">${icons.chevron}</span></div>
+    <div class="list-item" data-action="editor-share"><span>分享链接</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-history"><span>运行记录</span><span class="text-muted">${icons.chevron}</span></div>
     <div class="list-item" data-action="editor-tags">
       <span>标签 &amp; 文件夹</span>
@@ -2041,6 +2147,31 @@ async function exportData() {
   } catch (e) { toast('导出失败：' + e.message, 'danger'); }
 }
 
+/* 导入：选一个导出的 JSON，把提示词批量塞进素材库 */
+function pickImportFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.onchange = async () => {
+    const f = input.files?.[0];
+    if (!f) return;
+    try {
+      const raw = JSON.parse(await f.text());
+      const list = Array.isArray(raw?.prompts) ? raw.prompts : Array.isArray(raw) ? raw : null;
+      if (!list) { toast('文件格式不对：需要 prompts 数组', 'danger'); return; }
+      if (!list.length) { toast('文件里没有提示词', 'warning'); return; }
+      if (!confirm(`将导入 ${list.length} 条提示词，是否继续？\n（已存在的不会受到影响）`)) return;
+      const r = await A.importPrompts(list);
+      await refreshPrompts();
+      toast(`已导入 ${r.imported} 条 ✓`, 'success');
+      renderLibrary();
+    } catch (e) {
+      toast(/JSON|Unexpected/.test(e.message) ? '文件不是合法 JSON' : '导入失败：' + e.message, 'danger');
+    }
+  };
+  input.click();
+}
+
 /* ================= 竞技场排行榜 ================= */
 async function showArenaBoard() {
   try {
@@ -2265,6 +2396,12 @@ document.addEventListener('click', async (e) => {
     case 'varset-save':      saveVarSet(); break;
     case 'varset-apply':     applyVarSet(el.dataset.name); break;
     case 'varset-del':       removeVarSet(el.dataset.id); break;
+    case 'editor-share':     openShareSheet(); break;
+    case 'share-copy':       copyText(el.dataset.link || ''); break;
+    case 'share-preview':    go('share/' + el.dataset.sid); break;
+    case 'share-off':        stopShare(); break;
+    case 'share-fork':       forkShared(); break;
+    case 'share-home':       go(location.origin && state.user ? 'workbench' : 'login'); break;
     case 'editor-more':      openEditorMore(); break;
     case 'editor-copy':      copyText(buildPreview() || ''); closeOverlay(); break;
     case 'editor-export':    exportEditorTxt(); break;
@@ -2378,6 +2515,7 @@ document.addEventListener('click', async (e) => {
     /* --- 设置 / 数据 --- */
     case 'toggle-notify': saveSettings({ notify: settingsState.notify ? 0 : 1 }); break;
     case 'export-data':   exportData(); break;
+    case 'import-data':   pickImportFile(); break;
 
     /* --- 批量测试 --- */
     case 'batch-run':     runBatchTest(); break;
@@ -2441,13 +2579,16 @@ async function boot() {
   setAuthMode('code');
 
   await loadUser();
+  const hash0 = parseHash();
+  // 分享页免登录，其余未登录一律回登录页
+  if (state.user || String(hash0).startsWith('share/')) apply(hash0);
+  if (!state.user && !String(hash0).startsWith('share/')) go('login');
   if (state.user) {
-    apply(parseHash());
     refreshAll().then(() => {
       syncAll();
       loadEditorPrompt(state.prompts[0] || null);
     }).catch(() => {});
-  } else {
+  } else if (!String(hash0).startsWith('share/')) {
     go('login');
   }
 

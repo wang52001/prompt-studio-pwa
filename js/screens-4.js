@@ -38,6 +38,8 @@ export const screens4 = {
       <div class="mt-2"></div>
       ${listItem('数据导出（JSON）', 'export-data')}
       <div class="mt-2"></div>
+      ${listItem('导入提示词（JSON）', 'import-data')}
+      <div class="mt-2"></div>
       ${listItem('离线缓存管理', 'toast')}
 
       <div class="group-title">关于</div>
