@@ -89,10 +89,13 @@ export const screens1 = {
              data-placeholder="用户提示词：你真正要问的那句话…"></div>
       </div>
 
-      <div class="editor-box">
-        <div class="text-bold text-sm">变量（每行一条：变量名=默认值）</div>
-        <div class="content editable mt-2" id="edVars" contenteditable="true"
-             data-placeholder="产品名=便携咖啡杯&#10;卖点=30 秒速冷"></div>
+      <div class="editor-box" id="edVarsBox">
+        <div class="row between">
+          <span class="text-bold text-sm">变量 <span class="text-xs text-muted" id="edVarsCount"></span></span>
+          <span class="text-xs text-primary" data-action="varset-manage">方案</span>
+        </div>
+        <div class="mt-2" id="edVarsForm"></div>
+        <div class="mt-2" id="edVarsSets"></div>
       </div>
 
       <div class="editor-box">

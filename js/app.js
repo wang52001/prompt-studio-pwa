@@ -478,27 +478,150 @@ function renderLibrary() {
 }
 
 /* ================= 编辑器 ================= */
-const varsToText = (v) => {
-  let o = {};
-  try { o = typeof v === 'string' ? JSON.parse(v || '{}') : (v || {}); } catch { o = {}; }
-  return Object.entries(o).map(([k, val]) => `${k}=${val}`).join('\n');
+/* 变量值可能是对象（已 normalize）也可能是库里的 JSON 字符串 */
+const parseVars = (v) => {
+  if (!v) return {};
+  if (typeof v === 'object') return { ...v };
+  try { const o = JSON.parse(v); return o && typeof o === 'object' ? o : {}; }
+  catch { return {}; }
 };
 
-const textToVars = (t) => {
-  const o = {};
-  String(t || '').split('\n').forEach(line => {
-    const i = line.indexOf('=');
-    if (i > 0) o[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+/* 变量值的唯一数据源：所有输入框都读写它，取代原来的手写文本区 */
+const varMap = () => (state.__vars ||= {});
+
+/* 从 System / User 里解析 ${变量} 占位符，保持出现顺序去重 */
+function extractVars() {
+  const src = `${$('#edSystem')?.innerText || ''}\n${$('#edUser')?.innerText || ''}`;
+  const seen = [];
+  src.replace(/\$\{([^}]+)\}/g, (_, k) => {
+    const name = String(k).trim();
+    if (name && !seen.includes(name)) seen.push(name);
+    return '';
   });
-  return o;
-};
+  return seen;
+}
+
+function renderVarForm() {
+  const box = $('#edVarsForm');
+  if (!box) return;
+  const names = extractVars();
+  const vals = varMap();
+
+  if ($('#edVarsCount')) {
+    $('#edVarsCount').textContent = names.length ? `${names.length} 个占位符` : '（用 ${变量名} 添加）';
+  }
+
+  if (!names.length) {
+    const extra = Object.keys(vals).filter(k => Object.prototype.hasOwnProperty.call(vals, k));
+    box.innerHTML = extra.length
+      ? `<div class="text-xs text-muted">这些值已不再被引用：${esc(extra.join('、'))}</div>`
+      : `<div class="text-xs text-muted">提示词里用 \${变量名} 占位，这里会自动生成填写框</div>`;
+    return;
+  }
+
+  box.innerHTML = names.map(n => {
+    const filled = String(vals[n] || '').length > 0;
+    return `
+      <div class="row gap-2 mt-2">
+        <span class="chip" style="flex:none;min-width:76px;justify-content:flex-start">${esc(n)}</span>
+        <input class="auth-input" data-var="${esc(n)}" value="${esc(vals[n] || '')}"
+               placeholder="${filled ? '' : '填写后自动代入预览'}" />
+      </div>`;
+  }).join('');
+}
+
+function renderVarSets() {
+  const box = $('#edVarsSets');
+  if (!box) return;
+  const sets = state.__varSets || [];
+  if (!sets.length) { box.innerHTML = ''; return; }
+  const cur = state.__curVarSet || '';
+  box.innerHTML = `
+    <div class="text-xs text-muted">取值方案</div>
+    <div class="chip-row" style="margin:6px 0 0">
+      ${sets.map(s => `
+        <span class="chip${cur === s.name ? ' active' : ''}" data-action="varset-apply"
+              data-name="${esc(s.name)}">${esc(s.name)}</span>`).join('')}
+    </div>`;
+}
+
+/* 变量方案：列表 / 另存 / 应用 / 删除 */
+async function openVarSetSheet() {
+  if (!state.currentPromptId) { toast('先保存一次这条提示词', 'warning'); return; }
+  overlay('<div class="text-muted" style="padding:20px;text-align:center">加载中…</div>');
+  try {
+    const r = await A.varSets(state.currentPromptId);
+    state.__varSets = r.sets || [];
+  } catch (e) { overlay(`<div class="text-sm" style="padding:20px">加载失败：${esc(e.message)}</div>`); return; }
+  renderVarSetSheet();
+}
+
+function renderVarSetSheet() {
+  const sets = state.__varSets || [];
+  overlay(`
+    <div class="text-bold" style="font-size:15px;margin-bottom:4px">取值方案</div>
+    <div class="text-xs text-muted" style="margin-bottom:10px">把当前这串变量值存成方案，换一组变量不用重新敲</div>
+    ${sets.length ? `
+      <div style="max-height:40vh;overflow-y:auto">
+        ${sets.map(s => `
+          <div class="list-item" data-action="varset-apply" data-name="${esc(s.name)}">
+            <div style="flex:1">
+              <div class="text-sm text-bold">${esc(s.name)}</div>
+              <div class="text-xs text-muted" style="margin-top:2px">
+                ${esc(Object.entries(s.values || {}).map(([k, v]) => `${k}=${v}`).join('，').slice(0, 50))}
+              </div>
+            </div>
+            <span class="text-xs" style="color:var(--danger);padding:0 6px"
+                  data-action="varset-del" data-id="${s.id}">删除</span>
+          </div>`).join('')}
+      </div>` : '<div class="text-xs text-muted" style="padding:12px 2px">还没有保存过方案</div>'}
+    <div class="action-bar mt-2">
+      <button class="btn ghost block" data-close>关闭</button>
+      <button class="btn block" data-action="varset-save">把当前值存为方案</button>
+    </div>`);
+}
+
+async function saveVarSet() {
+  if (!state.currentPromptId) { toast('先保存一次这条提示词', 'warning'); return; }
+  const name = prompt('方案名（例如：咖啡机 / 保温杯）')?.trim();
+  if (!name) return;
+  try {
+    await A.saveVarSet(state.currentPromptId, name, varMap());
+    toast('方案已保存', 'success');
+    openVarSetSheet();
+  } catch (e) { toast('保存失败：' + e.message, 'danger'); }
+}
+
+function applyVarSet(name) {
+  const s = (state.__varSets || []).find(x => x.name === name);
+  if (!s) return;
+  state.__vars = { ...(s.values || {}) };
+  state.__curVarSet = name;
+  renderVarForm();
+  renderVarSets();
+  buildPreview();
+  markEditorDirty();
+  closeOverlay();
+  toast(`已套用「${name}」`, 'success');
+}
+
+async function removeVarSet(id) {
+  if (!confirm('删除这个取值方案？')) return;
+  try {
+    await A.deleteVarSet(id);
+    state.__varSets = (state.__varSets || []).filter(s => s.id !== Number(id));
+    toast('已删除', 'success');
+    renderVarSetSheet();
+    renderVarSets();
+  } catch (e) { toast('删除失败：' + e.message, 'danger'); }
+}
 
 function editorData() {
   return {
     title: ($('#edTitle')?.value || '').trim(),
     system_prompt: ($('#edSystem')?.innerText || '').trim(),
     user_prompt: ($('#edUser')?.innerText || '').trim(),
-    variables: textToVars($('#edVars')?.innerText),
+    variables: varMap(),
     model: state.model
   };
 }
@@ -520,10 +643,15 @@ function loadEditorPrompt(p) {
   if ($('#edTitle')) $('#edTitle').value = p?.title || '';
   if ($('#edSystem')) $('#edSystem').textContent = p?.system_prompt || '';
   if ($('#edUser')) $('#edUser').textContent = p?.user_prompt || '';
-  if ($('#edVars')) $('#edVars').textContent = varsToText(p?.variables);
+  state.__vars = parseVars(p?.variables);
+  state.__curVarSet = '';
+  state.__varSets = [];
   if ($('#edSaved')) $('#edSaved').textContent = p ? `已保存 · ${relTime(p.updated_at)}` : '未保存';
   syncEditorRole();
+  renderVarForm();
   buildPreview();
+  // 换提示词时把上一轮的方案列表清掉，避免串味
+  if (p?.id) refreshPrompts().then(renderVarSets).catch(() => {});
 }
 
 function newPrompt() {
@@ -2133,6 +2261,10 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'hist-del':         removeHistoryItem(el.dataset.id); break;
+    case 'varset-manage':    openVarSetSheet(); break;
+    case 'varset-save':      saveVarSet(); break;
+    case 'varset-apply':     applyVarSet(el.dataset.name); break;
+    case 'varset-del':       removeVarSet(el.dataset.id); break;
     case 'editor-more':      openEditorMore(); break;
     case 'editor-copy':      copyText(buildPreview() || ''); closeOverlay(); break;
     case 'editor-export':    exportEditorTxt(); break;
@@ -2273,9 +2405,22 @@ window.addEventListener('offline', syncNetwork);
 
 /* ================= 启动 ================= */
 function bindInputs() {
-  ['#edSystem', '#edUser', '#edVars'].forEach(sel => {
+  // System / User 变了 → 重新解析 ${变量} 并重绘变量表单
+  ['#edSystem', '#edUser'].forEach(sel => {
     const el = $(sel);
-    if (el) el.addEventListener('input', () => { buildPreview(); markEditorDirty(); });
+    if (el) el.addEventListener('input', () => {
+      renderVarForm(); buildPreview(); markEditorDirty();
+    });
+  });
+  // 变量输入框：事件委托，表单是动态渲染的
+  $('#edVarsBox')?.addEventListener('input', (e) => {
+    const name = e.target?.dataset?.var;
+    if (!name) return;
+    varMap()[name] = e.target.value;
+    state.__curVarSet = '';
+    renderVarSets();
+    buildPreview();
+    markEditorDirty();
   });
   const search = $('#libSearch');
   if (search) search.addEventListener('input', renderLibrary);

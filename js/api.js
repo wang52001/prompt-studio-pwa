@@ -126,6 +126,13 @@ export const setDefault = (id) => api('keys/default', { method: 'POST', body: { 
 export const updateKey  = (id, p) => api(`keys/${id}`, { method: 'PUT', body: p });
 export const deleteKey  = (id) => api(`keys/${id}`, { method: 'DELETE' });
 
+// 取值方案：一套提示词保存多组变量值
+export const varSets = (promptId) => api(`prompts/${promptId}/varsets`);
+export const saveVarSet = (promptId, name, values) =>
+  api(`prompts/${promptId}/varsets`, { method: 'POST', body: { name, values } });
+export const deleteVarSet = (promptId, setId) =>
+  api(`prompts/${promptId}/varsets/${setId}`, { method: 'DELETE' });
+
 /* ---------------- 对话记录 ---------------- */
 export const chatHistory = (promptId = 0) =>
   api(`chat-history${promptId ? `?prompt_id=${promptId}` : ''}`);

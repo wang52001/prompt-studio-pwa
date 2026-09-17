@@ -13,6 +13,11 @@ const AI_KEY_VAR = 'DASHSCOPE_API_KEY';
 /* 版本历史表：首次用到时幂等创建，免去手动跑迁移脚本 */
 let _pvReady = false;
 
+/* JSON 解析兜底：脏数据不让它把接口打挂 */
+const safeJson = (s, fallback = {}) => {
+  try { return JSON.parse(s || ''); } catch { return fallback; }
+};
+
 /* 对话记录表：同样幂等创建 */
 let _histReady = false;
 async function ensureChatHistory(env) {
@@ -34,6 +39,25 @@ async function ensureChatHistory(env) {
     'CREATE INDEX IF NOT EXISTS idx_chat_history ON chat_history(user_id, id)'
   ).run();
   _histReady = true;
+}
+
+/* 变量取值方案表：同样幂等创建 */
+let _vsReady = false;
+async function ensureVarSets(env) {
+  if (_vsReady) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS prompt_varsets (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      prompt_id  INTEGER NOT NULL,
+      name       TEXT NOT NULL,
+      values_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`).run();
+  await env.DB.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_prompt_varsets ON prompt_varsets(prompt_id)'
+  ).run();
+  _vsReady = true;
 }
 
 /* 元信息列（标签 / 文件夹 / 置顶）：旧库用 ALTER TABLE 幂等补齐 */
@@ -308,6 +332,53 @@ export async function onRequest(ctx) {
              JSON.stringify(p.tags || []), p.folder || '', p.pinned ? 1 : 0).run();
       await checkBadges(env, user.id);
       return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    /* ---------- 变量取值方案（一套提示词 + 多组变量值） ---------- */
+    if (path.startsWith('prompts/') && path.endsWith('/varsets') && method === 'GET') {
+      await ensureVarSets(env);
+      const pid = path.split('/')[1];
+      const { results } = await env.DB.prepare(
+        `SELECT id, name, values_json FROM prompt_varsets
+         WHERE user_id = ? AND prompt_id = ? ORDER BY id`
+      ).bind(user.id, pid).all();
+      return json({ sets: results.map(r => ({ ...r, values: safeJson(r.values_json) })) });
+    }
+
+    if (path.startsWith('prompts/') && path.endsWith('/varsets') && method === 'POST') {
+      await ensureVarSets(env);
+      const pid = path.split('/')[1];
+      const { name, values } = await body(request);
+      const nm = String(name || '').trim().slice(0, 20);
+      if (!nm) return err('给方案起个名字');
+      const vj = JSON.stringify(values || {});
+      // 同名方案视为覆盖，避免反复「另存」堆积垃圾
+      const old = await env.DB.prepare(
+        'SELECT id FROM prompt_varsets WHERE user_id = ? AND prompt_id = ? AND name = ?'
+      ).bind(user.id, pid, nm).first();
+      if (old) {
+        await env.DB.prepare(
+          'UPDATE prompt_varsets SET values_json = ?, created_at = datetime(\'now\') WHERE id = ?'
+        ).bind(vj, old.id).run();
+        return json({ ok: true, id: old.id, updated: true });
+      }
+      const cnt = await env.DB.prepare(
+        'SELECT COUNT(*) n FROM prompt_varsets WHERE user_id = ? AND prompt_id = ?'
+      ).bind(user.id, pid).first();
+      if ((cnt?.n || 0) >= 10) return err('每条提示词最多 10 套方案');
+      const r = await env.DB.prepare(
+        'INSERT INTO prompt_varsets (user_id, prompt_id, name, values_json) VALUES (?, ?, ?, ?)'
+      ).bind(user.id, pid, nm, vj).run();
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    if (path.startsWith('prompts/') && path.includes('/varsets/') && method === 'DELETE') {
+      await ensureVarSets(env);
+      const parts = path.split('/');            // prompts/:id/varsets/:sid
+      const sid = Number(parts[3]) || 0;
+      await env.DB.prepare('DELETE FROM prompt_varsets WHERE id = ? AND user_id = ?')
+        .bind(sid, user.id).run();
+      return json({ ok: true });
     }
 
     /* 只改元信息（标签 / 文件夹 / 置顶），不进版本历史、不动版本号 */
