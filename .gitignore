@@ -6,3 +6,4 @@ __pycache__/
 node_modules/
 # 本地部署凭据（Cloudflare API Token，勿提交）
 .cf_token
+.gh_token
